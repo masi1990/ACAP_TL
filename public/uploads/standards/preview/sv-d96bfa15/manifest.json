@@ -1,0 +1,120 @@
+{
+  "pageCount": 15,
+  "scopePage": 7,
+  "mode": "public",
+  "pages": [
+    {
+      "n": 1,
+      "label": "Cover",
+      "access": "free",
+      "image": "page-01.png",
+      "note": null
+    },
+    {
+      "n": 2,
+      "label": "Page 2",
+      "access": "free",
+      "image": "page-02.png",
+      "note": null
+    },
+    {
+      "n": 3,
+      "label": "Page 3",
+      "access": "free",
+      "image": "page-03.png",
+      "note": null
+    },
+    {
+      "n": 4,
+      "label": "Page 4",
+      "access": "free",
+      "image": "page-04.png",
+      "note": null
+    },
+    {
+      "n": 5,
+      "label": "Page 5",
+      "access": "free",
+      "image": "page-05.png",
+      "note": null
+    },
+    {
+      "n": 6,
+      "label": "Page 6",
+      "access": "free",
+      "image": "page-06.png",
+      "note": null
+    },
+    {
+      "n": 7,
+      "label": "1 Scope (Clause 1 only)",
+      "access": "free",
+      "image": "page-07-scope-only.png",
+      "note": "Free preview ends after Clause 1 Scope. Clause 2+ is not shown.",
+      "scopeOnly": true
+    },
+    {
+      "n": 7.1,
+      "label": "Page 7 (Clause 2+ locked)",
+      "access": "locked",
+      "image": "page-07.png",
+      "note": "Clause 2 Normative references and later text are locked."
+    },
+    {
+      "n": 8,
+      "label": "Page 8 (locked)",
+      "access": "locked",
+      "image": "page-08.png",
+      "note": null
+    },
+    {
+      "n": 9,
+      "label": "Page 9 (locked)",
+      "access": "locked",
+      "image": "page-09.png",
+      "note": null
+    },
+    {
+      "n": 10,
+      "label": "Page 10 (locked)",
+      "access": "locked",
+      "image": "page-10.png",
+      "note": null
+    },
+    {
+      "n": 11,
+      "label": "Page 11 (locked)",
+      "access": "locked",
+      "image": "page-11.png",
+      "note": null
+    },
+    {
+      "n": 12,
+      "label": "Page 12 (locked)",
+      "access": "locked",
+      "image": "page-12.png",
+      "note": null
+    },
+    {
+      "n": 13,
+      "label": "Page 13 (locked)",
+      "access": "locked",
+      "image": "page-13.png",
+      "note": null
+    },
+    {
+      "n": 14,
+      "label": "Page 14 (locked)",
+      "access": "locked",
+      "image": "page-14.png",
+      "note": null
+    },
+    {
+      "n": 15,
+      "label": "Page 15 (locked)",
+      "access": "locked",
+      "image": "page-15.png",
+      "note": null
+    }
+  ]
+}
