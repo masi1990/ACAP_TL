@@ -1,0 +1,274 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arso-oran.org/schemas/acap-tl/audit-event.schema.json",
+  "title": "ACAP-TL Append-Only Audit Event",
+  "description": "Schema for immutable audit_event rows written in the same PostgreSQL transaction as domain state changes (or via transactional outbox to an audit service). Operators must not UPDATE or DELETE these rows.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "eventId",
+    "occurredAt",
+    "action",
+    "entityType",
+    "entityId",
+    "actor",
+    "outcome",
+    "before",
+    "after",
+    "integrity"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Primary key; UUIDv7 preferred for time-sortable append order"
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp when the domain change committed"
+    },
+    "recordedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Optional ingest time if audit is asynchronously mirrored; defaults to occurredAt for same-TX writes"
+    },
+    "action": {
+      "type": "string",
+      "description": "Stable verb.noun or verb_entity action code",
+      "examples": [
+        "coc.issue",
+        "coc.suspend",
+        "pin.status_change",
+        "cb_license.grant",
+        "type2_sublicence.issue",
+        "approval.decide",
+        "impersonation.start",
+        "user.invite",
+        "complaint.assign",
+        "portfolio.transfer",
+        "order.payment_confirmed",
+        "entitlement.grant",
+        "watermark.generate",
+        "tariff_map.publish",
+        "standard.publish",
+        "fraud_alert.raise",
+        "session.idle_logout"
+      ]
+    },
+    "entityType": {
+      "type": "string",
+      "description": "Domain entity type name",
+      "examples": [
+        "CoC",
+        "ProductPin",
+        "CbLicense",
+        "MarkSublicense",
+        "CertificationApplication",
+        "ApprovalRequest",
+        "ConsumerComplaint",
+        "StandardVersion",
+        "StandardTariffMap",
+        "OrganizationMembership",
+        "Order",
+        "StandardEntitlement",
+        "LedgerAnchor"
+      ]
+    },
+    "entityId": {
+      "type": "string",
+      "description": "Primary identifier of the affected entity"
+    },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actorType"],
+      "properties": {
+        "actorType": {
+          "type": "string",
+          "enum": ["user", "system", "adapter", "scheduler"]
+        },
+        "actorUserId": { "type": ["string", "null"] },
+        "impersonatorUserId": {
+          "type": ["string", "null"],
+          "description": "Set when ARSO support is acting as another user"
+        },
+        "orgId": { "type": ["string", "null"] },
+        "roleAtTime": { "type": ["string", "null"] },
+        "serviceAccountId": { "type": ["string", "null"] }
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "correlationId": {
+          "type": "string",
+          "description": "End-to-end business correlation (e.g. certification cycle or transfer workflow)"
+        },
+        "causationId": {
+          "type": ["string", "null"],
+          "description": "Prior audit_event or command that caused this event"
+        },
+        "requestId": { "type": ["string", "null"] },
+        "idempotencyKey": { "type": ["string", "null"] },
+        "entryPointId": {
+          "type": ["string", "null"],
+          "description": "Border/customs entry point when applicable"
+        },
+        "memberStateId": { "type": ["string", "null"] },
+        "recId": { "type": ["string", "null"] },
+        "schemeCode": { "type": ["string", "null"] },
+        "ip": { "type": ["string", "null"] },
+        "userAgent": { "type": ["string", "null"] },
+        "locale": {
+          "type": ["string", "null"],
+          "enum": ["en", "fr", "pt", "ar", null]
+        },
+        "channel": {
+          "type": ["string", "null"],
+          "enum": [
+            "web",
+            "api",
+            "webhook",
+            "batch",
+            "offline_sync",
+            "scheduler",
+            "system",
+            null
+          ]
+        }
+      }
+    },
+    "reason": {
+      "type": ["string", "null"],
+      "description": "Mandatory for approvals, sanctions, impersonation, portfolio transfers, and refunds"
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["success", "rejected", "failed", "noop_idempotent"]
+    },
+    "before": {
+      "type": ["object", "null"],
+      "description": "Redacted JSON snapshot before change; secrets/PAN never stored"
+    },
+    "after": {
+      "type": ["object", "null"],
+      "description": "Redacted JSON snapshot after change"
+    },
+    "attachments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["attachmentId", "contentHash"],
+        "properties": {
+          "attachmentId": { "type": "string" },
+          "contentHash": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          },
+          "mediaType": { "type": "string" }
+        }
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["payloadHash"],
+      "properties": {
+        "payloadHash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "description": "Hash of canonical event payload excluding this integrity object"
+        },
+        "prevEventHash": {
+          "type": ["string", "null"],
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "description": "Optional hash-chain link to previous event in partition"
+        },
+        "chainPartition": {
+          "type": ["string", "null"],
+          "description": "e.g. entityType:entityId or global day partition"
+        }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "class": {
+          "type": "string",
+          "enum": [
+            "evidentiary_coc",
+            "iam_security",
+            "commerce",
+            "operational",
+            "complaint_pii"
+          ]
+        },
+        "legalHold": { "type": "boolean", "default": false },
+        "purgeEligibleAt": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "eventId": "0194f0a2-6c3d-7e8b-9a10-112233445566",
+      "occurredAt": "2026-10-04T12:00:00Z",
+      "recordedAt": "2026-10-04T12:00:00Z",
+      "action": "coc.issue",
+      "entityType": "CoC",
+      "entityId": "coc-ars464-demo-0001",
+      "actor": {
+        "actorType": "user",
+        "actorUserId": "user-cb-decision-01",
+        "impersonatorUserId": null,
+        "orgId": "org-cb-demo",
+        "roleAtTime": "CB_CERTIFICATION_DECISION_MAKER"
+      },
+      "context": {
+        "correlationId": "certapp-demo-0001",
+        "causationId": "approval-demo-0009",
+        "requestId": "req-abc",
+        "idempotencyKey": "cb-decision-certapp-demo-0001",
+        "schemeCode": "ACAP-FOOD-ARS464",
+        "channel": "web",
+        "locale": "en"
+      },
+      "reason": "All required lab results PASS; technical review complete; evaluation staff distinct from decision maker",
+      "outcome": "success",
+      "before": {
+        "applicationStatus": "pending_decision"
+      },
+      "after": {
+        "applicationStatus": "issued",
+        "cocStatus": "issued",
+        "productStatus": "certified",
+        "pin": "PIN-DEMO-VARIANT-1",
+        "validFrom": "2026-10-04",
+        "validTo": "2029-10-03"
+      },
+      "attachments": [
+        {
+          "attachmentId": "att-type2-licence-pdf-1",
+          "contentHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "mediaType": "application/pdf"
+        }
+      ],
+      "integrity": {
+        "payloadHash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "prevEventHash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "chainPartition": "CoC:coc-ars464-demo-0001"
+      },
+      "retention": {
+        "class": "evidentiary_coc",
+        "legalHold": false,
+        "purgeEligibleAt": null
+      }
+    }
+  ]
+}

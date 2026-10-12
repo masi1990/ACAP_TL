@@ -1,0 +1,691 @@
+// ACAP–TL hub schema (PostgreSQL)
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model MemberState {
+  id           String         @id
+  iso2         String         @unique
+  name         String
+  organizations Organization[]
+  entryPoints  EntryPoint[]
+  nationalRules NationalRule[]
+}
+
+model Rec {
+  id          String       @id
+  code        String       @unique
+  name        String
+  tariffLines TariffLine[]
+}
+
+model Organization {
+  id             String                   @id @default(cuid())
+  name           String
+  type           String // ARSO | CB | CLIENT | NSB | CUSTOMS | ENTRY_POINT_OP
+  memberStateId  String?
+  memberState    MemberState?             @relation(fields: [memberStateId], references: [id])
+  primaryAdminId String?
+  createdAt      DateTime                 @default(now())
+  memberships    OrganizationMembership[]
+  entryPoints    EntryPoint[]
+  cbLicenses     CbLicense[]
+  clientAccounts ClientAccount[]
+  markSublicenses MarkSublicense[]        @relation("IssuerOrg")
+  complaintsRouted ConsumerComplaint[]    @relation("RoutedCb")
+  applications   CertificationApplication[]
+  inspections    ConformityInspection[]
+  clearances     CustomsClearance[]
+  servicingCbId  String?
+  servicingCb    Organization?  @relation("CbClients", fields: [servicingCbId], references: [id])
+  clients        Organization[] @relation("CbClients")
+}
+
+model UserAccount {
+  id              String                   @id @default(cuid())
+  email           String                   @unique
+  name            String
+  passwordHash    String
+  emailVerified   Boolean                  @default(false)
+  locale          String                   @default("en")
+  /// Legacy comma-separated global roles (kept in sync with UserRoleAssignment for GLOBAL scope)
+  rolesGlobal     String                   @default("")
+  createdAt       DateTime                 @default(now())
+  lastActiveAt    DateTime                 @default(now())
+  memberships     OrganizationMembership[]
+  sessions        Session[]
+  invitationsSent Invitation[]             @relation("InvitedBy")
+  roleAssignments UserRoleAssignment[]
+}
+
+/// Canonical RBAC role catalogue (system + custom). Permissions are least-privilege sets.
+model RoleDefinition {
+  id               String               @id @default(cuid())
+  code             String               @unique
+  name             String
+  description      String               @default("")
+  scope            String               // GLOBAL | ORG
+  permissionsJson  String               // JSON string[] of Permission codes
+  isSystem         Boolean              @default(false)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  assignments      UserRoleAssignment[]
+}
+
+model UserRoleAssignment {
+  id             String         @id @default(cuid())
+  userId         String
+  user           UserAccount    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleCode       String
+  role           RoleDefinition @relation(fields: [roleCode], references: [code], onDelete: Restrict)
+  organizationId String? // required for ORG-scoped roles; null for GLOBAL
+  grantedAt      DateTime       @default(now())
+  grantedById    String?
+
+  @@unique([userId, roleCode, organizationId])
+  @@index([userId])
+  @@index([roleCode])
+}
+
+model OrganizationMembership {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String
+  role           String // PRIMARY_ADMIN | ORG_ADMIN | ORG_USER | CB_OFFICER | CUSTOMS_OFFICER
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  user           UserAccount  @relation(fields: [userId], references: [id])
+
+  @@unique([organizationId, userId])
+}
+
+model Invitation {
+  id             String      @id @default(cuid())
+  organizationId String
+  email          String
+  role           String
+  token          String      @unique
+  invitedById    String
+  invitedBy      UserAccount @relation("InvitedBy", fields: [invitedById], references: [id])
+  acceptedAt     DateTime?
+  createdAt      DateTime    @default(now())
+  expiresAt      DateTime
+}
+
+model Session {
+  id               String      @id @default(cuid())
+  userId           String
+  user             UserAccount @relation(fields: [userId], references: [id])
+  token            String      @unique
+  createdAt        DateTime    @default(now())
+  lastActivityAt   DateTime    @default(now())
+  expiresAt        DateTime
+  impersonatorId   String?
+  impersonationReason String?
+}
+
+model EntryPoint {
+  id             String        @id @default(cuid())
+  name           String
+  code           String        @unique
+  kind           String // BORDER | PORT | AIRPORT | INLAND
+  memberStateId  String
+  memberState    MemberState   @relation(fields: [memberStateId], references: [id])
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  locationNote   String?
+}
+
+model Standard {
+  id          String            @id
+  designation String            @unique
+  titleEn     String
+  titleFr     String?
+  titlePt     String?
+  titleAr     String?
+  ics         String
+  publisher   String            @default("ARSO")
+  versions    StandardVersion[]
+}
+
+model StandardVersion {
+  id                   String              @id
+  standardId           String
+  standard             Standard            @relation(fields: [standardId], references: [id])
+  editionLabel         String
+  year                 Int
+  effectiveFrom        DateTime
+  publicationStatus    String
+  authoritativeLocale  String              @default("en")
+  sourcePdfUri         String?
+  contentHash          String
+  scopeEn              String
+  machineDocJson       String // full machine-readable pack JSON
+  requirementsJson     String // requirements array JSON
+  normativeRefsJson    String
+  packagingJson        String?
+  labellingJson        String?
+  samplingJson         String?
+  tariffMaps           StandardTariffMap[]
+  nationalRules        NationalRuleLink[]
+  catalogItem          CatalogItem?
+  productLinks         ProductStandardLink[]
+  applications         CertificationApplication[]
+  inspections          ConformityInspection[]
+}
+
+model TariffLine {
+  id                 String              @id
+  recId              String
+  rec                Rec                 @relation(fields: [recId], references: [id])
+  codeDisplay        String
+  codeNormalized     String
+  codeLength         Int
+  parentTariffLineId String?
+  parent             TariffLine?         @relation("TariffParent", fields: [parentTariffLineId], references: [id])
+  children           TariffLine[]        @relation("TariffParent")
+  hsHeading          String
+  description        String
+  effectiveFrom      DateTime
+  effectiveTo        DateTime?
+  maps               StandardTariffMap[]
+  products           Product[]
+
+  @@unique([recId, codeNormalized, effectiveFrom])
+}
+
+model StandardTariffMap {
+  id                String          @id
+  standardVersionId String
+  standardVersion   StandardVersion @relation(fields: [standardVersionId], references: [id])
+  tariffLineId      String
+  tariffLine        TariffLine      @relation(fields: [tariffLineId], references: [id])
+  mappingEffect     String          @default("include")
+  overrideMode      String?
+  effectiveFrom     DateTime
+  notes             String?
+
+  @@unique([standardVersionId, tariffLineId])
+}
+
+model NationalRule {
+  id            String             @id @default(cuid())
+  memberStateId String
+  memberState   MemberState        @relation(fields: [memberStateId], references: [id])
+  title         String
+  reference     String
+  summary       String
+  effectiveFrom DateTime
+  links         NationalRuleLink[]
+}
+
+model NationalRuleLink {
+  id                String          @id @default(cuid())
+  nationalRuleId    String
+  nationalRule      NationalRule    @relation(fields: [nationalRuleId], references: [id])
+  standardVersionId String
+  standardVersion   StandardVersion @relation(fields: [standardVersionId], references: [id])
+}
+
+model CbLicense {
+  id               String          @id @default(cuid())
+  organizationId   String
+  organization     Organization    @relation(fields: [organizationId], references: [id])
+  licenseType      String // TYPE1_QUALITY | TYPE1_ECO | TYPE2
+  markScheme       String // QUALITY | ECO
+  status           String // PENDING | APPROVED | SUSPENDED | EXPIRED | WITHDRAWN
+  approvalMode     String? // AUTO | MANUAL | HYBRID — for Type2
+  issuedAt         DateTime?
+  expiresAt        DateTime?
+  graceUntil       DateTime? // 2yr grace for Type1 renewals
+  parentLicenseId  String?
+  parentLicense    CbLicense?      @relation("Type2Parent", fields: [parentLicenseId], references: [id])
+  childLicenses    CbLicense[]     @relation("Type2Parent")
+  pdfUri           String?
+  licenseNumber    String          @unique
+  sublicenses      MarkSublicense[]
+  createdAt        DateTime        @default(now())
+}
+
+model MarkSublicense {
+  id             String       @id @default(cuid())
+  cbLicenseId    String
+  cbLicense      CbLicense    @relation(fields: [cbLicenseId], references: [id])
+  issuerOrgId    String
+  issuerOrg      Organization @relation("IssuerOrg", fields: [issuerOrgId], references: [id])
+  clientName     String
+  markScheme     String
+  status         String
+  approvalMode   String
+  issuedAt       DateTime?
+  expiresAt      DateTime?
+  pdfUri         String?
+  licenseNumber  String       @unique
+  createdAt      DateTime     @default(now())
+}
+
+model ClientAccount {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  displayName    String
+  companies      Company[]
+}
+
+model Company {
+  id              String        @id @default(cuid())
+  clientAccountId String
+  clientAccount   ClientAccount @relation(fields: [clientAccountId], references: [id])
+  legalName       String
+  countryIso2     String
+  products        Product[]
+}
+
+model Product {
+  id                 String                 @id @default(cuid())
+  companyId          String
+  company            Company                @relation(fields: [companyId], references: [id])
+  name               String
+  commodity          String
+  tariffLineId       String?
+  tariffLine         TariffLine?            @relation(fields: [tariffLineId], references: [id])
+  originClaimJson    String? // RulesOfOriginClaim
+  variants           ProductVariant[]
+  standardLinks      ProductStandardLink[]
+  applications       CertificationApplication[]
+  inspections        ConformityInspection[]
+  clearances         CustomsClearance[]
+}
+
+model ProductStandardLink {
+  id                String          @id @default(cuid())
+  productId         String          @unique
+  product           Product         @relation(fields: [productId], references: [id])
+  standardVersionId String
+  standardVersion   StandardVersion @relation(fields: [standardVersionId], references: [id])
+}
+
+model ProductVariant {
+  id        String     @id @default(cuid())
+  productId String
+  product   Product    @relation(fields: [productId], references: [id])
+  sku       String
+  grade     String?
+  label     String
+  pin       ProductPin?
+}
+
+model ProductPin {
+  id               String              @id @default(cuid())
+  variantId        String              @unique
+  variant          ProductVariant      @relation(fields: [variantId], references: [id])
+  pinCode          String              @unique
+  qrPayload        String
+  status           String // certified | expired | suspended | withdrawn
+  cocId            String?
+  coc              CoC?                @relation(fields: [cocId], references: [id])
+  issuedAt         DateTime?
+  expiresAt        DateTime?
+  fraudAlerts      FraudAlert[]
+  surveillanceCases SurveillanceCase[]
+  complaints       ConsumerComplaint[]
+}
+
+model CertificationApplication {
+  id                String          @id @default(cuid())
+  productId         String
+  product           Product         @relation(fields: [productId], references: [id])
+  organizationId    String // CB
+  organization      Organization    @relation(fields: [organizationId], references: [id])
+  standardVersionId String
+  standardVersion   StandardVersion @relation(fields: [standardVersionId], references: [id])
+  status            String // DRAFT | EVALUATION | REVIEW | DECISION | CERTIFIED | REJECTED | WITHDRAWN
+  markScheme        String // QUALITY | ECO
+  qualityApprovedAt DateTime?
+  ecoApprovedAt     DateTime?
+  createdAt         DateTime        @default(now())
+  labResults        LabResult[]
+  attachments       Attachment[]
+  coc               CoC?
+  idempotencyKey    String?         @unique
+  assessmentItems   AssessmentItem[]
+
+  @@unique([productId, standardVersionId])
+}
+
+/// One row of the standard, a national regulation, or an extra requirement.
+model AssessmentItem {
+  id             String                   @id @default(cuid())
+  applicationId  String
+  application    CertificationApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  source         String // STANDARD | NATIONAL | OTHER
+  kind           String                   @default("clause") // clause | table
+  itemKey        String
+  section        String                   @default("")
+  clause         String                   @default("")
+  heading        String                   @default("")
+  text           String
+  testMethod     String                   @default("")
+  countryIso2    String?
+  pass           Boolean?
+  measuredValue  String                   @default("")
+  unit           String                   @default("")
+  notes          String                   @default("")
+  sortOrder      Int                      @default(0)
+  evidence       LabEvidence[]
+
+  @@unique([applicationId, itemKey])
+}
+
+model LabEvidence {
+  id               String         @id @default(cuid())
+  assessmentItemId String
+  assessmentItem   AssessmentItem @relation(fields: [assessmentItemId], references: [id], onDelete: Cascade)
+  filename         String
+  contentType      String
+  storageUri       String
+  uploadedAt       DateTime       @default(now())
+}
+
+model LabResult {
+  id             String                    @id @default(cuid())
+  applicationId  String                    @unique
+  application    CertificationApplication  @relation(fields: [applicationId], references: [id])
+  requirementId  String
+  measuredValue  String
+  unit           String
+  pass           Boolean
+  labName        String
+  testedAt       DateTime
+  notes          String?
+}
+
+model Attachment {
+  id            String                   @id @default(cuid())
+  applicationId String
+  application   CertificationApplication @relation(fields: [applicationId], references: [id])
+  filename      String
+  contentType   String
+  storageUri    String
+  uploadedAt    DateTime                 @default(now())
+}
+
+model CoC {
+  id             String                   @id @default(cuid())
+  applicationId  String                   @unique
+  application    CertificationApplication @relation(fields: [applicationId], references: [id])
+  certificateNo  String                   @unique
+  status         String // certified | expired | suspended | withdrawn | cancelled
+  issuedAt       DateTime
+  expiresAt      DateTime
+  markScheme     String
+  pins           ProductPin[]
+  markGrants     MarkGrant[]
+  ledgerAnchors  LedgerAnchor[]
+  feeEvents      FeeEvent[]
+  notifications  NotificationJob[]
+  clearances     CustomsClearance[]
+}
+
+model MarkGrant {
+  id        String   @id @default(cuid())
+  cocId     String
+  coc       CoC      @relation(fields: [cocId], references: [id])
+  markScheme String
+  status    String
+  grantedAt DateTime
+}
+
+model LedgerAnchor {
+  id         String   @id @default(cuid())
+  cocId      String?
+  coc        CoC?     @relation(fields: [cocId], references: [id])
+  eventType  String
+  payloadHash String
+  chainId    String   @default("stub-acap-ledger")
+  blockRef   String?
+  anchoredAt DateTime @default(now())
+  entityRef  String?
+}
+
+model FeeEvent {
+  id     String @id @default(cuid())
+  cocId  String
+  coc    CoC    @relation(fields: [cocId], references: [id])
+  amount Float
+  currency String @default("USD")
+  kind   String
+  createdAt DateTime @default(now())
+}
+
+model NotificationJob {
+  id        String    @id @default(cuid())
+  cocId     String
+  coc       CoC       @relation(fields: [cocId], references: [id])
+  kind      String // EXPIRY_REMINDER
+  monthsOut Int
+  scheduledFor DateTime
+  sentAt    DateTime?
+  status    String    @default("PENDING")
+}
+
+model AuditEvent {
+  id               String   @id @default(cuid())
+  occurredAt       DateTime @default(now())
+  actorUserId      String?
+  impersonatorId   String?
+  action           String
+  entityType       String
+  entityId         String
+  organizationId   String?
+  beforeJson       String?
+  afterJson        String?
+  reason           String?
+  ipHint           String?
+  prevHash         String?
+  eventHash        String
+}
+
+model CatalogItem {
+  id                String          @id @default(cuid())
+  standardVersionId String          @unique
+  standardVersion   StandardVersion @relation(fields: [standardVersionId], references: [id])
+  priceCents        Int
+  currency          String          @default("USD")
+  coverTitle        String
+  previewScopeOnly  Boolean         @default(true)
+  active            Boolean         @default(true)
+  orderLines        OrderLine[]
+}
+
+model Order {
+  id           String            @id @default(cuid())
+  buyerEmail   String
+  buyerName    String
+  buyerPhone   String?
+  status       String // CART | CHECKOUT | PAID | FULFILLED | FAILED
+  totalCents   Int               @default(0)
+  currency     String            @default("USD")
+  createdAt    DateTime          @default(now())
+  lines        OrderLine[]
+  payments     PaymentAttempt[]
+  entitlements StandardEntitlement[]
+}
+
+model OrderLine {
+  id            String      @id @default(cuid())
+  orderId       String
+  order         Order       @relation(fields: [orderId], references: [id])
+  catalogItemId String
+  catalogItem   CatalogItem @relation(fields: [catalogItemId], references: [id])
+  unitPriceCents Int
+  qty           Int         @default(1)
+}
+
+model PaymentAttempt {
+  id               String   @id @default(cuid())
+  orderId          String
+  order            Order    @relation(fields: [orderId], references: [id])
+  provider         String // PESAPAL
+  providerRef      String?
+  amountCents      Int
+  currency         String
+  status           String // INITIATED | CONFIRMED | FAILED
+  confirmationCode String?
+  paymentMethod    String?
+  statusDetail     String?
+  /// Pesapal status payload. Card numbers are never included.
+  rawJson          String?
+  createdAt        DateTime @default(now())
+  confirmedAt      DateTime?
+
+  @@index([providerRef])
+}
+
+/// Pesapal IPN id registered for this environment, so checkout does not depend on a restart.
+model PesapalNotification {
+  id              String   @id @default(cuid())
+  environment     String
+  notificationUrl String
+  notificationId  String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([environment, notificationUrl])
+}
+
+model StandardEntitlement {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id])
+  buyerEmail  String
+  catalogItemId String
+  grantedAt   DateTime @default(now())
+  artifactUri String?
+  watermarkText String?
+}
+
+model WebhookOutbox {
+  id          String    @id @default(cuid())
+  eventType   String
+  payloadJson String
+  targetHint  String? // EAC | ECOWAS | COMESA | NSW
+  status      String    @default("PENDING") // PENDING | DELIVERED | FAILED
+  createdAt   DateTime  @default(now())
+  deliveredAt DateTime?
+  attempts    Int       @default(0)
+}
+
+model OfflineCacheProfile {
+  id          String   @id @default(cuid())
+  entryPointCode String
+  pinCode     String
+  statusJson  String
+  asOf        DateTime
+  signature   String
+  createdAt   DateTime @default(now())
+}
+
+model SurveillanceCase {
+  id          String     @id @default(cuid())
+  pinId       String?
+  pin         ProductPin? @relation(fields: [pinId], references: [id])
+  title       String
+  status      String // OPEN | INVESTIGATING | SANCTIONED | CLOSED
+  summary     String
+  createdAt   DateTime   @default(now())
+  sanctions   Sanction[]
+}
+
+model Sanction {
+  id        String           @id @default(cuid())
+  caseId    String
+  case      SurveillanceCase @relation(fields: [caseId], references: [id])
+  level     String // WARNING | SUSPEND_PIN | SUSPEND_COC | WITHDRAW | MARK_MISUSE
+  cascadesTo String? // PIN | COC | MARKS
+  appliedAt DateTime         @default(now())
+  notes     String?
+}
+
+/// One conformity check of a product against its single linked standard.
+model ConformityInspection {
+  id                String          @id @default(cuid())
+  productId         String
+  product           Product         @relation(fields: [productId], references: [id])
+  standardVersionId String
+  standardVersion   StandardVersion @relation(fields: [standardVersionId], references: [id])
+  organizationId    String?
+  organization      Organization?   @relation(fields: [organizationId], references: [id])
+  inspectorUserId   String?
+  result            String // CONFORM | NON_CONFORM
+  findings          String          @default("")
+  inspectedAt       DateTime        @default(now())
+}
+
+/// Customs decision to allow, hold, or refuse a product entering one country from another.
+model CustomsClearance {
+  id              String        @id @default(cuid())
+  productId       String
+  product         Product       @relation(fields: [productId], references: [id])
+  cocId           String?
+  coc             CoC?          @relation(fields: [cocId], references: [id])
+  organizationId  String?
+  organization    Organization? @relation(fields: [organizationId], references: [id])
+  officerUserId   String?
+  originIso2      String
+  destinationIso2 String
+  decision        String // ALLOW | REFUSE | HOLD
+  reason          String        @default("")
+  decidedAt       DateTime      @default(now())
+}
+
+model ConsumerComplaint {
+  id             String        @id @default(cuid())
+  pinId          String?
+  pin            ProductPin?   @relation(fields: [pinId], references: [id])
+  complainantEmail String
+  subject        String
+  body           String
+  status         String        @default("OPEN")
+  routedCbId     String?
+  routedCb       Organization? @relation("RoutedCb", fields: [routedCbId], references: [id])
+  createdAt      DateTime      @default(now())
+}
+
+model FraudAlert {
+  id        String     @id @default(cuid())
+  pinId     String?
+  pin       ProductPin? @relation(fields: [pinId], references: [id])
+  kind      String // MARK_MISUSE | COUNTERFEIT | SUSPICIOUS_VERIFY
+  message   String
+  status    String     @default("OPEN")
+  createdAt DateTime   @default(now())
+}
+
+model MetricSnapshot {
+  id        String   @id @default(cuid())
+  key       String
+  value     Float
+  labelsJson String?
+  takenAt   DateTime @default(now())
+}
+
+model RateLimitBucket {
+  id        String   @id
+  count     Int      @default(0)
+  windowStart DateTime @default(now())
+}
+
+model PortfolioTransfer {
+  id           String   @id @default(cuid())
+  fromClientId String
+  toClientId   String
+  productIdsJson String
+  status       String   @default("STUB_PENDING")
+  reason       String?
+  createdAt    DateTime @default(now())
+}

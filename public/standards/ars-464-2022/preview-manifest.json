@@ -1,0 +1,183 @@
+{
+  "designation": "ARS 464:2022",
+  "title": "Milled rice \u2014 Specification",
+  "pageCount": 17,
+  "freeThroughPage": 7,
+  "scopePage": 7,
+  "scopeClearRatio": 0.26,
+  "pages": [
+    {
+      "n": 1,
+      "label": "Cover",
+      "access": "free"
+    },
+    {
+      "n": 2,
+      "label": "Table of contents",
+      "access": "free"
+    },
+    {
+      "n": 3,
+      "label": "Foreword",
+      "access": "free"
+    },
+    {
+      "n": 4,
+      "label": "Copyright notice",
+      "access": "free"
+    },
+    {
+      "n": 5,
+      "label": "Introduction",
+      "access": "free"
+    },
+    {
+      "n": 6,
+      "label": "Blank",
+      "access": "free"
+    },
+    {
+      "n": 7,
+      "label": "1 Scope (page 1)",
+      "access": "partial",
+      "note": "Scope clear; Clause 2+ blurred"
+    },
+    {
+      "n": 8,
+      "label": "Normative references (cont.)",
+      "access": "locked"
+    },
+    {
+      "n": 9,
+      "label": "Terms and definitions",
+      "access": "locked"
+    },
+    {
+      "n": 10,
+      "label": "Definitions (cont.)",
+      "access": "locked"
+    },
+    {
+      "n": 11,
+      "label": "Definitions (cont.)",
+      "access": "locked"
+    },
+    {
+      "n": 12,
+      "label": "4 Requirements",
+      "access": "locked"
+    },
+    {
+      "n": 13,
+      "label": "Grading / Table 1",
+      "access": "locked"
+    },
+    {
+      "n": 14,
+      "label": "Contaminants / Hygiene / Packaging",
+      "access": "locked"
+    },
+    {
+      "n": 15,
+      "label": "Labelling / Sampling",
+      "access": "locked"
+    },
+    {
+      "n": 16,
+      "label": "Bibliography",
+      "access": "locked"
+    },
+    {
+      "n": 17,
+      "label": "End matter",
+      "access": "locked"
+    }
+  ],
+  "toc": [
+    {
+      "number": "1",
+      "title": "Scope",
+      "page": "1",
+      "preview": true
+    },
+    {
+      "number": "2",
+      "title": "Normative references",
+      "page": "1",
+      "preview": false
+    },
+    {
+      "number": "3",
+      "title": "Definitions",
+      "page": "2",
+      "preview": false
+    },
+    {
+      "number": "4",
+      "title": "Quality requirements",
+      "page": "6",
+      "preview": false
+    },
+    {
+      "number": "4.2",
+      "title": "General requirements",
+      "page": "6",
+      "preview": false
+    },
+    {
+      "number": "4.3",
+      "title": "Specific requirements",
+      "page": "6",
+      "preview": false
+    },
+    {
+      "number": "4.3.1",
+      "title": "Classification",
+      "page": "6",
+      "preview": false
+    },
+    {
+      "number": "4.3.2",
+      "title": "Grading",
+      "page": "7",
+      "preview": false
+    },
+    {
+      "number": "5",
+      "title": "Contaminants",
+      "page": "7",
+      "preview": false
+    },
+    {
+      "number": "5.1",
+      "title": "Metals",
+      "page": "7",
+      "preview": false
+    },
+    {
+      "number": "5.2",
+      "title": "Pesticide residues",
+      "page": "8",
+      "preview": false
+    },
+    {
+      "number": "6",
+      "title": "Hygiene",
+      "page": "8",
+      "preview": false
+    },
+    {
+      "number": "7",
+      "title": "Packaging",
+      "page": "8",
+      "preview": false
+    },
+    {
+      "number": "8",
+      "title": "Labelling",
+      "page": "8",
+      "preview": false
+    }
+  ],
+  "basePath": "/standards/ars-464-2022/pages/preview"
+}

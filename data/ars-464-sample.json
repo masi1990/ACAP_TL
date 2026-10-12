@@ -1,0 +1,623 @@
+{
+  "schemaVersion": "1.0.0",
+  "standard": {
+    "designation": "ARS 464",
+    "title": {
+      "en": "Milled rice — Specification"
+    },
+    "ics": [
+      "67.060"
+    ],
+    "technicalCommittee": "ARSO/TC 12",
+    "publisher": "ARSO",
+    "documentType": "AfricanStandard"
+  },
+  "version": {
+    "year": 2022,
+    "editionLabel": "ARS 464:2022",
+    "effectiveFrom": "2022-01-01",
+    "supersedes": null,
+    "publicationStatus": "published",
+    "authoritativeLocale": "en",
+    "sourcePdfUri": "arso://standards/ars-464-2022/en/master.pdf",
+    "legalDualFormNote": "PDF remains authoritative; machine form is operational encoding for ACAP-TL pilot."
+  },
+  "locales": [
+    {
+      "locale": "en",
+      "translationStatus": "authoritative",
+      "pdfMasterUri": "arso://standards/ars-464-2022/en/master.pdf",
+      "previewUri": "arso://standards/ars-464-2022/en/preview-cover-scope.pdf",
+      "machineDocUri": "arso://standards/ars-464-2022/en/machine.json",
+      "rtl": false
+    },
+    {
+      "locale": "fr",
+      "translationStatus": "missing",
+      "pdfMasterUri": null,
+      "previewUri": null,
+      "machineDocUri": null,
+      "rtl": false
+    },
+    {
+      "locale": "pt",
+      "translationStatus": "missing",
+      "pdfMasterUri": null,
+      "previewUri": null,
+      "machineDocUri": null,
+      "rtl": false
+    },
+    {
+      "locale": "ar",
+      "translationStatus": "missing",
+      "pdfMasterUri": null,
+      "previewUri": null,
+      "machineDocUri": null,
+      "rtl": true
+    }
+  ],
+  "scope": {
+    "text": {
+      "en": "This African Standard specifies the requirements and methods of sampling and test for milled rice of the varieties grown from Oryza spp. intended for human consumption."
+    },
+    "commodity": "milled_rice",
+    "species": [
+      "Oryza spp."
+    ],
+    "intendedUse": "human_consumption"
+  },
+  "normativeReferences": [
+    {
+      "id": "NR-ARS-53",
+      "designation": "ARS 53",
+      "title": "General principles of food hygiene — Code of practice",
+      "role": "hygiene",
+      "dated": false,
+      "platformHook": "hygiene_scheme"
+    },
+    {
+      "id": "NR-ARS-56",
+      "designation": "ARS 56",
+      "title": "Prepackaged foods — Labelling",
+      "role": "labelling",
+      "dated": false,
+      "platformHook": "labelling"
+    },
+    {
+      "id": "NR-ISO-712",
+      "designation": "ISO 712",
+      "title": "Cereals and cereal products — Determination of moisture content — Routine reference method",
+      "role": "test_method",
+      "dated": false,
+      "platformHook": null
+    },
+    {
+      "id": "NR-ISO-16050",
+      "designation": "ISO 16050",
+      "title": "Foodstuffs — Determination of aflatoxin B1, and the total content of aflatoxin B1, B2, G1 and G2 in cereals, nuts and derived products — High performance liquid chromatographic method",
+      "role": "test_method",
+      "dated": false,
+      "platformHook": null
+    },
+    {
+      "id": "NR-ISO-24333",
+      "designation": "ISO 24333",
+      "title": "Cereals and cereal products — Sampling",
+      "role": "sampling",
+      "dated": false,
+      "platformHook": "sampling"
+    },
+    {
+      "id": "NR-ISO-605",
+      "designation": "ISO 605",
+      "title": "Pulses — Determination of impurities, size, foreign odours, insects, and species and variety — Test methods",
+      "role": "test_method",
+      "dated": false,
+      "platformHook": null
+    },
+    {
+      "id": "NR-CODEX-193",
+      "designation": "CODEX STAN 193",
+      "title": "Codex general standard for contaminants and toxins in food and feed",
+      "role": "contaminants",
+      "dated": false,
+      "platformHook": "contaminants"
+    }
+  ],
+  "grades": [
+    {
+      "code": "GRADE_1",
+      "label": "Grade 1",
+      "isRejectable": false
+    },
+    {
+      "code": "GRADE_2",
+      "label": "Grade 2",
+      "isRejectable": false
+    },
+    {
+      "code": "GRADE_3",
+      "label": "Grade 3",
+      "isRejectable": false
+    },
+    {
+      "code": "UNGRADED",
+      "label": "Ungraded milled rice",
+      "isRejectable": false
+    }
+  ],
+  "requirements": [
+    {
+      "requirementId": "ARS464-T1-01",
+      "source": {
+        "clause": "4.3.2",
+        "table": "Table 1",
+        "row": 1,
+        "pageHint": 7
+      },
+      "characteristic": "Broken",
+      "operator": "<=",
+      "unit": "%",
+      "limitsByGrade": {
+        "GRADE_1": 5,
+        "GRADE_2": 15,
+        "GRADE_3": 25
+      },
+      "testMethod": {
+        "designation": "ISO 605",
+        "methodId": "TM-ISO-605"
+      },
+      "category": "physical_grade"
+    },
+    {
+      "requirementId": "ARS464-T1-02",
+      "source": {
+        "clause": "4.3.2",
+        "table": "Table 1",
+        "row": 2,
+        "pageHint": 7
+      },
+      "characteristic": "Damaged rice",
+      "operator": "<=",
+      "unit": "%",
+      "limitsByGrade": {
+        "GRADE_1": 1.5,
+        "GRADE_2": 2,
+        "GRADE_3": 3
+      },
+      "testMethod": {
+        "designation": "ISO 605",
+        "methodId": "TM-ISO-605"
+      },
+      "category": "physical_grade"
+    },
+    {
+      "requirementId": "ARS464-T1-03",
+      "source": {
+        "clause": "4.3.2",
+        "table": "Table 1",
+        "row": 3,
+        "pageHint": 7
+      },
+      "characteristic": "Chalky",
+      "operator": "<=",
+      "unit": "%",
+      "limitsByGrade": {
+        "GRADE_1": 2,
+        "GRADE_2": 4,
+        "GRADE_3": 10
+      },
+      "testMethod": {
+        "designation": "ISO 605",
+        "methodId": "TM-ISO-605"
+      },
+      "category": "physical_grade"
+    },
+    {
+      "requirementId": "ARS464-T1-04",
+      "source": {
+        "clause": "4.3.2",
+        "table": "Table 1",
+        "row": 4,
+        "pageHint": 7
+      },
+      "characteristic": "Red or red streaked",
+      "operator": "<=",
+      "unit": "%",
+      "limitsByGrade": {
+        "GRADE_1": 2,
+        "GRADE_2": 6,
+        "GRADE_3": 12
+      },
+      "testMethod": {
+        "designation": "ISO 605",
+        "methodId": "TM-ISO-605"
+      },
+      "category": "physical_grade"
+    },
+    {
+      "requirementId": "ARS464-T1-05",
+      "source": {
+        "clause": "4.3.2",
+        "table": "Table 1",
+        "row": 5,
+        "pageHint": 7
+      },
+      "characteristic": "Immature grains",
+      "operator": "<=",
+      "unit": "%",
+      "limitsByGrade": {
+        "GRADE_1": 1,
+        "GRADE_2": 1.5,
+        "GRADE_3": 2
+      },
+      "testMethod": {
+        "designation": "ISO 605",
+        "methodId": "TM-ISO-605"
+      },
+      "category": "physical_grade"
+    },
+    {
+      "requirementId": "ARS464-T1-06",
+      "source": {
+        "clause": "4.3.2",
+        "table": "Table 1",
+        "row": 6,
+        "pageHint": 7
+      },
+      "characteristic": "Other contrasting varieties",
+      "operator": "<=",
+      "unit": "%",
+      "limitsByGrade": {
+        "GRADE_1": 1,
+        "GRADE_2": 2,
+        "GRADE_3": 3
+      },
+      "testMethod": {
+        "designation": "ISO 605",
+        "methodId": "TM-ISO-605"
+      },
+      "category": "physical_grade"
+    },
+    {
+      "requirementId": "ARS464-T1-07",
+      "source": {
+        "clause": "4.3.2",
+        "table": "Table 1",
+        "row": 7,
+        "pageHint": 7
+      },
+      "characteristic": "Organic matter",
+      "operator": "<=",
+      "unit": "%",
+      "limitsByGrade": {
+        "GRADE_1": 0.1,
+        "GRADE_2": 0.2,
+        "GRADE_3": 0.5
+      },
+      "testMethod": {
+        "designation": "ISO 605",
+        "methodId": "TM-ISO-605"
+      },
+      "category": "physical_grade"
+    },
+    {
+      "requirementId": "ARS464-T1-08",
+      "source": {
+        "clause": "4.3.2",
+        "table": "Table 1",
+        "row": 8,
+        "pageHint": 7
+      },
+      "characteristic": "Inorganic matter",
+      "operator": "<=",
+      "unit": "%",
+      "limitsByGrade": {
+        "GRADE_1": 0.1,
+        "GRADE_2": 0.1,
+        "GRADE_3": 0.1
+      },
+      "testMethod": {
+        "designation": "ISO 605",
+        "methodId": "TM-ISO-605"
+      },
+      "category": "physical_grade"
+    },
+    {
+      "requirementId": "ARS464-T1-09",
+      "source": {
+        "clause": "4.3.2",
+        "table": "Table 1",
+        "row": 9,
+        "pageHint": 7
+      },
+      "characteristic": "Paddy grains",
+      "operator": "<=",
+      "unit": "%",
+      "limitsByGrade": {
+        "GRADE_1": 0.3,
+        "GRADE_2": 0.3,
+        "GRADE_3": 0.3
+      },
+      "testMethod": {
+        "designation": "ISO 605",
+        "methodId": "TM-ISO-605"
+      },
+      "category": "physical_grade"
+    },
+    {
+      "requirementId": "ARS464-T1-10",
+      "source": {
+        "clause": "4.3.2",
+        "table": "Table 1",
+        "row": 10,
+        "pageHint": 7
+      },
+      "characteristic": "Live insect infestation",
+      "operator": "nil",
+      "unit": "per_kg",
+      "limitsByGrade": {
+        "GRADE_1": "Nil",
+        "GRADE_2": "Nil",
+        "GRADE_3": "Nil"
+      },
+      "testMethod": {
+        "designation": "ISO 605",
+        "methodId": "TM-ISO-605"
+      },
+      "category": "physical_grade"
+    },
+    {
+      "requirementId": "ARS464-T1-11",
+      "source": {
+        "clause": "4.3.2",
+        "table": "Table 1",
+        "row": 11,
+        "pageHint": 7
+      },
+      "characteristic": "Filth",
+      "operator": "<=",
+      "unit": "% m/m",
+      "limitsByGrade": {
+        "GRADE_1": 0.1,
+        "GRADE_2": 0.1,
+        "GRADE_3": 0.1
+      },
+      "testMethod": {
+        "designation": "ISO 605",
+        "methodId": "TM-ISO-605"
+      },
+      "category": "physical_grade"
+    },
+    {
+      "requirementId": "ARS464-T1-12",
+      "source": {
+        "clause": "4.3.2",
+        "table": "Table 1",
+        "row": 12,
+        "pageHint": 7
+      },
+      "characteristic": "Moisture content",
+      "operator": "<=",
+      "unit": "% m/m",
+      "limitsByGrade": {
+        "GRADE_1": 14,
+        "GRADE_2": 14,
+        "GRADE_3": 14
+      },
+      "testMethod": {
+        "designation": "ISO 712",
+        "methodId": "TM-ISO-712"
+      },
+      "category": "moisture"
+    },
+    {
+      "requirementId": "ARS464-T1-13",
+      "source": {
+        "clause": "4.3.2",
+        "table": "Table 1",
+        "row": 13,
+        "pageHint": 7
+      },
+      "characteristic": "Foreign matter",
+      "operator": "<=",
+      "unit": "% m/m",
+      "limitsByGrade": {
+        "GRADE_1": 0.2,
+        "GRADE_2": 0.3,
+        "GRADE_3": 0.6
+      },
+      "testMethod": {
+        "designation": "ISO 605",
+        "methodId": "TM-ISO-605"
+      },
+      "category": "physical_grade"
+    },
+    {
+      "requirementId": "ARS464-T1-14",
+      "source": {
+        "clause": "4.3.2",
+        "table": "Table 1",
+        "row": 14,
+        "pageHint": 7
+      },
+      "characteristic": "Total Aflatoxin (AFB1+AFB2+AFG1+AFG2)",
+      "operator": "<=",
+      "unit": "ppb",
+      "limitsByGrade": {
+        "ALL_GRADES": 10
+      },
+      "testMethod": {
+        "designation": "ISO 16050",
+        "methodId": "TM-ISO-16050"
+      },
+      "category": "mycotoxin"
+    },
+    {
+      "requirementId": "ARS464-T1-15",
+      "source": {
+        "clause": "4.3.2",
+        "table": "Table 1",
+        "row": 15,
+        "pageHint": 7
+      },
+      "characteristic": "Aflatoxin B1 only",
+      "operator": "<=",
+      "unit": "ppb",
+      "limitsByGrade": {
+        "ALL_GRADES": 5
+      },
+      "testMethod": {
+        "designation": "ISO 16050",
+        "methodId": "TM-ISO-16050"
+      },
+      "category": "mycotoxin"
+    },
+    {
+      "requirementId": "ARS464-T1-16",
+      "source": {
+        "clause": "4.3.2",
+        "table": "Table 1",
+        "row": 16,
+        "pageHint": 7
+      },
+      "characteristic": "Fumonisin B1 and B2",
+      "operator": "<=",
+      "unit": "ppm",
+      "limitsByGrade": {
+        "ALL_GRADES": 2
+      },
+      "testMethod": {
+        "designation": "AOAC Official Method 2001.04",
+        "methodId": "TM-AOAC-2001.04"
+      },
+      "category": "mycotoxin"
+    },
+    {
+      "requirementId": "ARS464-CONT-01",
+      "source": {
+        "clause": "5.1",
+        "table": null,
+        "row": null,
+        "pageHint": 7
+      },
+      "characteristic": "Heavy metal contaminants",
+      "operator": "comply_with_external",
+      "unit": "external",
+      "limitsByGrade": {
+        "ALL_GRADES": "CODEX STAN 193"
+      },
+      "testMethod": {
+        "designation": "CODEX STAN 193 / applicable ISO methods",
+        "methodId": null,
+        "notes": "Limits as specified in CODEX STAN 193"
+      },
+      "category": "contaminant"
+    }
+  ],
+  "packaging": {
+    "clause": "8",
+    "rules": [
+      {
+        "id": "PKG-01",
+        "statement": "Milled rice shall be packed in food grade packaging material which safeguards hygienic, nutritional and organoleptic qualities.",
+        "materialConstraint": "food_grade",
+        "maxPackageWeightKgHumanHandling": 50,
+        "destinationWeightsAndMeasures": true
+      }
+    ]
+  },
+  "labelling": {
+    "clause": "9",
+    "baseStandard": "ARS 56",
+    "requiredFields": [
+      {
+        "fieldId": "product_name",
+        "label": "Product name",
+        "required": true,
+        "allowedValues": [
+          "Milled Rice"
+        ]
+      },
+      {
+        "fieldId": "variety",
+        "label": "Variety",
+        "required": true,
+        "allowedValues": [
+          "Long grain milled rice",
+          "Medium grain milled rice",
+          "Short grain milled rice",
+          "Mixed milled rice"
+        ]
+      },
+      {
+        "fieldId": "grade",
+        "label": "Grade",
+        "required": true
+      },
+      {
+        "fieldId": "manufacturer_packer_importer",
+        "label": "Name, address and physical location of manufacturer/packer/importer",
+        "required": true
+      },
+      {
+        "fieldId": "lot_batch_code",
+        "label": "Lot/batch/code number",
+        "required": true
+      },
+      {
+        "fieldId": "net_weight_kg",
+        "label": "Net weight in kg",
+        "required": true
+      },
+      {
+        "fieldId": "food_for_human_consumption",
+        "label": "Declaration Food for Human Consumption",
+        "required": true
+      },
+      {
+        "fieldId": "storage_instruction",
+        "label": "Storage instruction",
+        "required": true,
+        "notes": "Store in a cool and dry place away from any contaminants"
+      },
+      {
+        "fieldId": "crop_year",
+        "label": "Crop year",
+        "required": true
+      },
+      {
+        "fieldId": "packing_date",
+        "label": "Packing date",
+        "required": true
+      },
+      {
+        "fieldId": "best_before",
+        "label": "Best before date",
+        "required": true
+      },
+      {
+        "fieldId": "package_disposal",
+        "label": "Instructions on disposal of used package",
+        "required": true
+      },
+      {
+        "fieldId": "country_of_origin",
+        "label": "Country of origin",
+        "required": true
+      },
+      {
+        "fieldId": "gmo_declaration",
+        "label": "Declaration whether genetically modified or not",
+        "required": true
+      }
+    ]
+  },
+  "sampling": {
+    "clause": "10",
+    "method": "ISO 24333",
+    "methodId": "TM-ISO-24333"
+  },
+  "contentHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "jsonLdContext": "https://arso-oran.org/contexts/acap-tl/v1.jsonld"
+}

@@ -1,0 +1,228 @@
+{
+  "$comment": "Pilot seed tariff maps for ARS 464:2022 milled rice. Same StandardVersion maps to COMESA/EAC/SADC HS6 and ECOWAS HS8/HS10 extensions.",
+  "schemaVersion": "1.0.0",
+  "standardVersion": {
+    "designation": "ARS 464:2022",
+    "standardId": "std-ars-464",
+    "standardVersionId": "stdver-ars-464-2022",
+    "ics": ["67.060"],
+    "commodity": "milled_rice"
+  },
+  "linkedStandards": [
+    {
+      "designation": "ARS 53",
+      "role": "hygiene",
+      "requiredWithPrimary": true
+    },
+    {
+      "designation": "ARS 56",
+      "role": "labelling",
+      "requiredWithPrimary": true
+    }
+  ],
+  "resolutionRules": {
+    "normalize": "strip non-digits from code_display to produce code_normalized",
+    "lookupOrder": [
+      "exact (rec_id, code_normalized)",
+      "walk parent_tariff_line_id within same REC",
+      "optional continental HS6 fallback if REC policy allows"
+    ],
+    "inheritance": "Standard mapped at parent length applies to children unless child-level StandardTariffMap override (add|replace|exclude)",
+    "uniqueness": "(rec_id, code_normalized, effective_from)"
+  },
+  "recs": [
+    {
+      "recId": "rec-comesa",
+      "code": "COMESA",
+      "name": "Common Market for Eastern and Southern Africa"
+    },
+    {
+      "recId": "rec-eac",
+      "code": "EAC",
+      "name": "East African Community"
+    },
+    {
+      "recId": "rec-sadc",
+      "code": "SADC",
+      "name": "Southern African Development Community"
+    },
+    {
+      "recId": "rec-ecowas",
+      "code": "ECOWAS",
+      "name": "Economic Community of West African States"
+    }
+  ],
+  "tariffLines": [
+    {
+      "tariffLineId": "tl-comesa-100630",
+      "recId": "rec-comesa",
+      "codeDisplay": "1006.30",
+      "codeNormalized": "100630",
+      "codeLength": 6,
+      "parentTariffLineId": null,
+      "hsHeading": "1006",
+      "description": "Semi-milled or wholly milled rice, whether or not polished or glazed",
+      "effectiveFrom": "2022-01-01",
+      "effectiveTo": null
+    },
+    {
+      "tariffLineId": "tl-eac-100630",
+      "recId": "rec-eac",
+      "codeDisplay": "1006.30",
+      "codeNormalized": "100630",
+      "codeLength": 6,
+      "parentTariffLineId": null,
+      "hsHeading": "1006",
+      "description": "Semi-milled or wholly milled rice, whether or not polished or glazed",
+      "effectiveFrom": "2022-01-01",
+      "effectiveTo": null
+    },
+    {
+      "tariffLineId": "tl-sadc-100630",
+      "recId": "rec-sadc",
+      "codeDisplay": "1006.30",
+      "codeNormalized": "100630",
+      "codeLength": 6,
+      "parentTariffLineId": null,
+      "hsHeading": "1006",
+      "description": "Semi-milled or wholly milled rice, whether or not polished or glazed",
+      "effectiveFrom": "2022-01-01",
+      "effectiveTo": null
+    },
+    {
+      "tariffLineId": "tl-ecowas-10063000",
+      "recId": "rec-ecowas",
+      "codeDisplay": "1006.30.00",
+      "codeNormalized": "10063000",
+      "codeLength": 8,
+      "parentTariffLineId": null,
+      "hsHeading": "1006",
+      "description": "Semi-milled or wholly milled rice — ECOWAS 8-digit extension",
+      "effectiveFrom": "2022-01-01",
+      "effectiveTo": null,
+      "notes": "ECOWAS regional extension under HS 1006.30"
+    },
+    {
+      "tariffLineId": "tl-ecowas-1006300000",
+      "recId": "rec-ecowas",
+      "codeDisplay": "1006.30.00.00",
+      "codeNormalized": "1006300000",
+      "codeLength": 10,
+      "parentTariffLineId": "tl-ecowas-10063000",
+      "hsHeading": "1006",
+      "description": "Semi-milled or wholly milled rice — ECOWAS 10-digit national/statistical extension",
+      "effectiveFrom": "2022-01-01",
+      "effectiveTo": null,
+      "notes": "Child of ECOWAS 1006.30.00; inherits ARS 464 mapping unless overridden"
+    }
+  ],
+  "standardTariffMaps": [
+    {
+      "mapId": "stm-ars464-comesa-100630",
+      "standardVersionId": "stdver-ars-464-2022",
+      "tariffLineId": "tl-comesa-100630",
+      "recId": "rec-comesa",
+      "codeDisplay": "1006.30",
+      "codeNormalized": "100630",
+      "codeLength": 6,
+      "mappingEffect": "include",
+      "effectiveFrom": "2022-01-01",
+      "effectiveTo": null,
+      "overrideMode": null,
+      "notes": "COMESA HS6 pilot seed"
+    },
+    {
+      "mapId": "stm-ars464-eac-100630",
+      "standardVersionId": "stdver-ars-464-2022",
+      "tariffLineId": "tl-eac-100630",
+      "recId": "rec-eac",
+      "codeDisplay": "1006.30",
+      "codeNormalized": "100630",
+      "codeLength": 6,
+      "mappingEffect": "include",
+      "effectiveFrom": "2022-01-01",
+      "effectiveTo": null,
+      "overrideMode": null,
+      "notes": "EAC HS6 / CET alignment at 6 digits"
+    },
+    {
+      "mapId": "stm-ars464-sadc-100630",
+      "standardVersionId": "stdver-ars-464-2022",
+      "tariffLineId": "tl-sadc-100630",
+      "recId": "rec-sadc",
+      "codeDisplay": "1006.30",
+      "codeNormalized": "100630",
+      "codeLength": 6,
+      "mappingEffect": "include",
+      "effectiveFrom": "2022-01-01",
+      "effectiveTo": null,
+      "overrideMode": null,
+      "notes": "SADC HS6 pilot seed"
+    },
+    {
+      "mapId": "stm-ars464-ecowas-10063000",
+      "standardVersionId": "stdver-ars-464-2022",
+      "tariffLineId": "tl-ecowas-10063000",
+      "recId": "rec-ecowas",
+      "codeDisplay": "1006.30.00",
+      "codeNormalized": "10063000",
+      "codeLength": 8,
+      "mappingEffect": "include",
+      "effectiveFrom": "2022-01-01",
+      "effectiveTo": null,
+      "overrideMode": null,
+      "notes": "ECOWAS 8-digit explicit map to same ARS 464 pack"
+    },
+    {
+      "mapId": "stm-ars464-ecowas-1006300000",
+      "standardVersionId": "stdver-ars-464-2022",
+      "tariffLineId": "tl-ecowas-1006300000",
+      "recId": "rec-ecowas",
+      "codeDisplay": "1006.30.00.00",
+      "codeNormalized": "1006300000",
+      "codeLength": 10,
+      "mappingEffect": "include",
+      "effectiveFrom": "2022-01-01",
+      "effectiveTo": null,
+      "overrideMode": "inherit_confirm",
+      "notes": "ECOWAS 10-digit explicit map; same requirements pack as HS8 parent"
+    }
+  ],
+  "lookupFixtures": [
+    {
+      "input": "1006.30",
+      "rec": "EAC",
+      "expectStandard": "ARS 464:2022"
+    },
+    {
+      "input": "100630",
+      "rec": "COMESA",
+      "expectStandard": "ARS 464:2022"
+    },
+    {
+      "input": "1006.30",
+      "rec": "SADC",
+      "expectStandard": "ARS 464:2022"
+    },
+    {
+      "input": "1006.30.00",
+      "rec": "ECOWAS",
+      "expectStandard": "ARS 464:2022"
+    },
+    {
+      "input": "10063000",
+      "rec": "ECOWAS",
+      "expectStandard": "ARS 464:2022"
+    },
+    {
+      "input": "1006.30.00.00",
+      "rec": "ECOWAS",
+      "expectStandard": "ARS 464:2022"
+    },
+    {
+      "input": "1006300000",
+      "rec": "ECOWAS",
+      "expectStandard": "ARS 464:2022"
+    }
+  ]
+}

@@ -1,0 +1,124 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #e8f0ea;
+  --bg-deep: #0f2a24;
+  --surface: #f7faf7;
+  --surface-2: #e3efe6;
+  --surface-3: #d3e4d8;
+  --ink: #12241f;
+  --muted: #4d635b;
+  --line: #b7c9be;
+  --line-strong: #6f8a7d;
+  --accent: #1f6b54;
+  --accent-fg: #f4fff9;
+  --sand: #c4a574;
+  --glow: rgba(31, 107, 84, 0.18);
+  --background: var(--bg);
+  --foreground: var(--ink);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(196, 165, 116, 0.28), transparent 55%),
+    radial-gradient(900px 500px at 90% 0%, rgba(31, 107, 84, 0.18), transparent 50%),
+    linear-gradient(180deg, #eef5f0 0%, #e2ebe4 45%, #d7e4db 100%);
+  font-family: var(--font-body), "Segoe UI", sans-serif;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.35;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.08'/%3E%3C/svg%3E");
+  z-index: 0;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.atmosphere {
+  position: relative;
+  isolation: isolate;
+}
+
+.atmosphere::after {
+  content: "";
+  position: absolute;
+  inset: -20% 40% auto -10%;
+  height: 420px;
+  background: radial-gradient(circle at 30% 40%, rgba(31, 107, 84, 0.22), transparent 60%);
+  animation: drift 14s ease-in-out infinite alternate;
+  z-index: -1;
+  pointer-events: none;
+}
+
+@keyframes drift {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(40px, 24px, 0) scale(1.08);
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.rise {
+  animation: rise 0.7s ease-out both;
+}
+
+.rise-delay {
+  animation: rise 0.8s ease-out 0.12s both;
+}
+
+.rise-delay-2 {
+  animation: rise 0.85s ease-out 0.22s both;
+}
+
+.panel {
+  background: color-mix(in oklab, var(--surface) 88%, white);
+  border: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+  border-radius: 1rem;
+  box-shadow: 0 18px 50px -36px rgba(15, 42, 36, 0.55);
+}
+
+.hero-plane {
+  background:
+    linear-gradient(120deg, rgba(15, 42, 36, 0.88), rgba(31, 107, 84, 0.72)),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1200' height='700' viewBox='0 0 1200 700'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop stop-color='%231f6b54'/%3E%3Cstop offset='1' stop-color='%230f2a24'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='1200' height='700' fill='url(%23g)'/%3E%3Cpath d='M0 480 C220 420 340 560 560 500 C780 440 900 300 1200 360 L1200 700 L0 700 Z' fill='%23c4a574' opacity='0.22'/%3E%3Cpath d='M0 540 C260 500 400 620 640 560 C880 500 980 420 1200 470 L1200 700 L0 700 Z' fill='%23e8f0ea' opacity='0.12'/%3E%3C/svg%3E");
+  background-size: cover;
+  background-position: center;
+  color: #f4fff9;
+}
