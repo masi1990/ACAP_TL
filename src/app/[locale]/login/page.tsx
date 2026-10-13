@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { isLocale, t, type Locale } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,6 @@ import { Label } from "@/components/ui/label";
 function LoginForm() {
   const params = useParams();
   const search = useSearchParams();
-  const router = useRouter();
   const raw = String(params.locale || "en");
   const locale: Locale = isLocale(raw) ? raw : "en";
   const nextPath = search.get("next");
@@ -38,7 +37,7 @@ function LoginForm() {
       setError(data.error || "Sign-in failed");
       return;
     }
-    router.push(safeNext);
+    window.location.assign(safeNext);
   }
 
   return (
@@ -64,7 +63,7 @@ function LoginForm() {
           />
         </div>
         {error && <p className="text-sm text-rose-700">{error}</p>}
-        <Button type="submit" className="w-full" disabled={loading} onClick={() => doLogin()}>
+        <Button type="submit" className="w-full" disabled={loading}>
           {loading ? t(locale, "loading") : t(locale, "login")}
         </Button>
       </form>

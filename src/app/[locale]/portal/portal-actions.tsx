@@ -66,7 +66,7 @@ export function PortalActions({
           Generate licence PDFs
         </Button>
         <Button disabled={busy} variant="secondary" onClick={() => post("/api/jobs/run-reminders")}>
-          Simulate expiry reminders
+          Send due notifications
         </Button>
         <Button disabled={busy} variant="outline" onClick={() => post("/api/portfolio/transfer-stub")}>
           Portfolio transfer stub

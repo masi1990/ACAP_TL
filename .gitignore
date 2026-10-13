@@ -33,6 +33,9 @@ yarn-error.log*
 # env files: .env is tracked so another computer can continue with the same Pesapal keys
 .env*.local
 
+# dossier files are served only to signed-in officers
+/storage
+
 # local sqlite
 /prisma/dev.db
 /prisma/dev.db-journal

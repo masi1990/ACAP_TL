@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db";
 import { generateWatermarkedStandardPdf } from "@/lib/pdf";
 import { appendAuditEvent } from "@/lib/audit";
+import { notifyAfterCommit, queueStoreFulfilled } from "@/lib/notifications";
 
 export type FulfillOrderResult = {
   orderId: string;
@@ -22,6 +23,21 @@ export async function fulfillPaidOrder(opts: {
     where: { orderId: opts.orderId },
   });
   if (existing?.artifactUri) {
+    const paid = await prisma.order.findUnique({
+      where: { id: opts.orderId },
+      include: { lines: { include: { catalogItem: true } } },
+    });
+    if (paid) {
+      await queueStoreFulfilled({
+        orderId: paid.id,
+        buyerEmail: paid.buyerEmail,
+        buyerName: paid.buyerName,
+        title: paid.lines[0]?.catalogItem.coverTitle || "ARSO standard",
+        artifactUri: existing.artifactUri,
+        locale: paid.locale,
+      });
+      await notifyAfterCommit();
+    }
     return {
       orderId: opts.orderId,
       artifactUri: existing.artifactUri,
@@ -116,6 +132,16 @@ export async function fulfillPaidOrder(opts: {
       providerRef: payment?.providerRef || opts.providerRef || null,
     },
   });
+
+  await queueStoreFulfilled({
+    orderId: order.id,
+    buyerEmail: order.buyerEmail,
+    buyerName: order.buyerName,
+    title: item.coverTitle,
+    artifactUri,
+    locale: order.locale,
+  });
+  await notifyAfterCommit();
 
   return {
     orderId: order.id,

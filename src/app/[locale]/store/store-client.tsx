@@ -39,6 +39,7 @@ export function StoreClient({
         buyerName: name,
         buyerPhone: phone,
         provider: "PESAPAL",
+        locale,
       }),
     });
     const data = await res.json();

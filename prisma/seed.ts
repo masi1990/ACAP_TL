@@ -1,11 +1,14 @@
 /**
- * Bootstrap seed only — no demo standards, RECs, tariffs, CBs, or products.
- * Seeds RoleDefinition catalogue + bootstrap users with least-privilege assignments.
+ * Bootstrap seed — roles, logins, member states, and reference RECs.
+ * No demo agencies, standards, tariffs, or products.
  *
  * Prefer `prisma db push --force-reset` then this seed (tables already empty).
  */
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { countryByIso2 } from "../src/lib/africa-regions";
+import { MEMBER_STATES, memberStateId } from "../src/lib/member-states";
+import { REFERENCE_RECS } from "../src/lib/rec-memberships";
 import { SYSTEM_ROLE_DEFS } from "../src/lib/rbac";
 
 const prisma = new PrismaClient();
@@ -32,6 +35,8 @@ async function main() {
     prisma.productPin.deleteMany(),
     prisma.coC.deleteMany(),
     prisma.labEvidence.deleteMany(),
+    prisma.dossierAttachment.deleteMany(),
+    prisma.testDossier.deleteMany(),
     prisma.assessmentItem.deleteMany(),
     prisma.labResult.deleteMany(),
     prisma.attachment.deleteMany(),
@@ -50,6 +55,7 @@ async function main() {
     prisma.standardVersion.deleteMany(),
     prisma.standard.deleteMany(),
     prisma.tariffLine.deleteMany(),
+    prisma.memberStateRec.deleteMany(),
     prisma.rec.deleteMany(),
     prisma.invitation.deleteMany(),
     prisma.session.deleteMany(),
@@ -171,19 +177,31 @@ async function main() {
   }
 
   await prisma.memberState.createMany({
-    data: [
-      { id: "ms-ke", iso2: "KE", name: "Kenya" },
-      { id: "ms-ng", iso2: "NG", name: "Nigeria" },
-      { id: "ms-za", iso2: "ZA", name: "South Africa" },
-      { id: "ms-sn", iso2: "SN", name: "Senegal" },
-      { id: "ms-gh", iso2: "GH", name: "Ghana" },
-      { id: "ms-tz", iso2: "TZ", name: "Tanzania" },
-      { id: "ms-ug", iso2: "UG", name: "Uganda" },
-      { id: "ms-rw", iso2: "RW", name: "Rwanda" },
-    ],
+    data: MEMBER_STATES.map((state) => ({
+      id: memberStateId(state.iso2),
+      iso2: state.iso2,
+      name: state.name,
+      region: countryByIso2(state.iso2)?.region || "",
+    })),
   });
 
-  console.log("Bootstrap seed complete (no catalogue demo data).");
+  for (const rec of REFERENCE_RECS) {
+    const row = await prisma.rec.create({
+      data: {
+        id: `rec-${rec.code.toLowerCase()}`,
+        code: rec.code,
+        name: rec.name,
+      },
+    });
+    await prisma.memberStateRec.createMany({
+      data: rec.iso2.map((iso2) => ({
+        memberStateId: memberStateId(iso2),
+        recId: row.id,
+      })),
+    });
+  }
+
+  console.log("Bootstrap seed complete (no demo agencies or catalogue products).");
   console.log(`Seeded ${SYSTEM_ROLE_DEFS.length} system RoleDefinitions.`);
   console.log("Logins (password: ChangeMe!ACAP):");
   console.log("  admin@arso-oran.org       — ARSO_ADMIN (full CRUD + roles)");

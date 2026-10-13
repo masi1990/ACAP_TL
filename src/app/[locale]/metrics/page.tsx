@@ -1,10 +1,17 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { isLocale } from "@/lib/i18n";
+import { getSessionUser } from "@/lib/auth";
+import { isLocale, type Locale } from "@/lib/i18n";
+import { ClientRedirect } from "@/components/admin/client-redirect";
+import { canOpenHubTools } from "@/lib/navigation";
 
 export default async function MetricsPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
+  const locale = raw as Locale;
+  const session = await getSessionUser();
+  if (!session) return <ClientRedirect href={`/${locale}/login?next=/${locale}/metrics`} />;
+  if (!canOpenHubTools(session.user)) return <ClientRedirect href={`/${locale}/dashboard`} />;
 
   const [standards, maps, cocs, pins, orders, outbox, audits, snapshots] = await Promise.all([
     prisma.standardVersion.count(),

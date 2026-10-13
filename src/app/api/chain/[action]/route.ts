@@ -4,6 +4,23 @@ import { appendAuditEvent } from "@/lib/audit";
 import { issueCertificateOfConformity } from "@/lib/coc";
 import { can } from "@/lib/rbac";
 import { requirePermission, type AuthedSession } from "@/lib/require-auth";
+import { isCountryCode } from "@/lib/countries";
+import { originClaimFromBody } from "@/lib/origin-claim";
+import {
+  assertCanManageTradeOrg,
+  createTradeProduct,
+  ensureCompany,
+  ProductRecordError,
+  resolveTariffLineId,
+} from "@/lib/product-record";
+import {
+  notifyAfterCommit,
+  queueComplaintEmails,
+  queueCustomsDecision,
+  queueInspectionNonConform,
+  queueSurveillanceOpened,
+} from "@/lib/notifications";
+import { requestedClientMark } from "@/lib/cb-licenses";
 
 type Ctx = { params: Promise<{ action: string }> };
 
@@ -19,8 +36,8 @@ function membershipOrgId(session: AuthedSession, types: string[]) {
 
 function iso2(value: unknown, label: string) {
   const code = String(value || "").trim().toUpperCase();
-  if (!/^[A-Z]{2}$/.test(code)) {
-    throw new Error(`${label} must be a 2-letter country code`);
+  if (!isCountryCode(code)) {
+    throw new Error(`${label} must be a country`);
   }
   return code;
 }
@@ -51,14 +68,15 @@ export async function POST(req: NextRequest, ctx: Ctx) {
 
   try {
     if (action === "products") return await registerProduct(session, body);
-    if (action === "tests") return await recordTest(session, body);
+    if (action === "tests") return await recordTest();
     if (action === "certificates") return await issueCertificate(session, body);
     if (action === "customs") return await decideCustoms(session, body);
     if (action === "inspections") return await recordInspection(session, body);
     return await openSurveillance(session, body);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Request failed";
-    return fail(message);
+    const status = err instanceof ProductRecordError ? err.status : 400;
+    return fail(message, status);
   }
 }
 
@@ -84,62 +102,30 @@ async function registerProduct(session: AuthedSession, body: Record<string, unkn
   if (!organization) return fail("Manufacturer or importer not found");
   if (!version) return fail("Standard not found");
 
-  const tradeTypes = ["MANUFACTURER", "IMPORTER", "CLIENT"];
-  if (!tradeTypes.includes(organization.type)) {
-    return fail("Products belong to a manufacturer or importer");
-  }
-  const ownTrade = session.user.memberships
-    .filter((m) => tradeTypes.includes(m.organization.type))
-    .map((m) => m.organization.id);
-  if (ownTrade.length && !can(session.user, "manufacturer:write")) {
-    if (!ownTrade.includes(organization.id)) {
-      return fail("You can only register products for your own organisation");
-    }
+  try {
+    assertCanManageTradeOrg(session, organization);
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : "Request failed", err instanceof ProductRecordError ? err.status : 400);
   }
 
-  const product = await prisma.$transaction(async (tx) => {
-    let companyId = organization.clientAccounts.flatMap((a) => a.companies)[0]?.id;
-    if (!companyId) {
-      const account = await tx.clientAccount.create({
-        data: { organizationId: organization.id, displayName: organization.name },
-      });
-      const company = await tx.company.create({
-        data: {
-          clientAccountId: account.id,
-          legalName: organization.name,
-          countryIso2: organization.memberState?.iso2 || "KE",
-        },
-      });
-      companyId = company.id;
-    }
-    const created = await tx.product.create({
-      data: {
-        companyId,
-        name,
-        commodity,
-      },
-    });
-    const tariff = await tx.standardTariffMap.findFirst({
-      where: { standardVersionId },
-      select: { tariffLineId: true },
-    });
-    if (tariff) {
-      await tx.product.update({
-        where: { id: created.id },
-        data: { tariffLineId: tariff.tariffLineId },
-      });
-    }
-    await tx.productStandardLink.create({
-      data: { productId: created.id, standardVersionId },
-    });
-    await tx.productVariant.create({
-      data: {
-        productId: created.id,
-        sku: `SKU-${created.id.slice(-8).toUpperCase()}`,
-        label: name,
-      },
-    });
-    return created;
+  const claim = originClaimFromBody(body, { importer: organization.type === "IMPORTER" });
+  const companyId = await ensureCompany(organization, claim.originIso2);
+  let markScheme: "QUALITY" | "ECO" = "QUALITY";
+  try {
+    markScheme = requestedClientMark(body.markScheme);
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : "Choose a mark");
+  }
+  const product = await createTradeProduct({
+    companyId,
+    name,
+    commodity,
+    standardVersionId,
+    machineDocJson: version.machineDocJson,
+    originClaimJson: JSON.stringify(claim),
+    tariffLineId: await resolveTariffLineId(standardVersionId, body.tariffLineId),
+    servicingCbId: organization.servicingCbId,
+    markScheme,
   });
 
   await appendAuditEvent({
@@ -154,81 +140,8 @@ async function registerProduct(session: AuthedSession, body: Record<string, unkn
   return NextResponse.json({ ok: true, id: product.id }, { status: 201 });
 }
 
-async function recordTest(session: AuthedSession, body: Record<string, unknown>) {
-  const productId = String(body.productId || "").trim();
-  const labName = String(body.labName || "").trim();
-  const measuredValue = String(body.measuredValue || "").trim();
-  const unit = String(body.unit || "").trim();
-  const notes = String(body.notes || "").trim();
-  const pass = body.pass === true || body.pass === "true" || body.pass === "pass";
-  if (!productId || !labName || !measuredValue || !unit) {
-    return fail("Product, laboratory, measured value, and unit are required");
-  }
-
-  const ownCb = membershipOrgId(session, ["CB"]);
-  const cbOrganizationId = String(body.cbOrganizationId || ownCb || "").trim();
-  if (!cbOrganizationId) return fail("Certification body is required");
-  if (ownCb && cbOrganizationId !== ownCb && !can(session.user, "cb:write")) {
-    return fail("You can only record a test for your certification body");
-  }
-
-  const [product, cb] = await Promise.all([
-    prisma.product.findUnique({
-      where: { id: productId },
-      include: { standardLinks: true, applications: { include: { labResults: true } } },
-    }),
-    prisma.organization.findUnique({ where: { id: cbOrganizationId } }),
-  ]);
-  if (!product) return fail("Product not found");
-  if (product.standardLinks.length !== 1) {
-    return fail("The product must be linked to exactly one standard");
-  }
-  if (!cb || cb.type !== "CB") return fail("Certification body not found");
-
-  const standardVersionId = product.standardLinks[0].standardVersionId;
-  const existing = product.applications.find((a) => a.standardVersionId === standardVersionId);
-  if (existing?.labResults.length) {
-    return fail("One test is already recorded for this product and standard");
-  }
-  if (existing && existing.organizationId !== cb.id) {
-    return fail("This product is already with another certification body");
-  }
-
-  const application =
-    existing ??
-    (await prisma.certificationApplication.create({
-      data: {
-        productId,
-        organizationId: cb.id,
-        standardVersionId,
-        status: "EVALUATION",
-        markScheme: "QUALITY",
-      },
-    }));
-
-  const lab = await prisma.labResult.create({
-    data: {
-      applicationId: application.id,
-      requirementId: "product-conformity",
-      measuredValue,
-      unit,
-      pass,
-      labName,
-      testedAt: new Date(),
-      notes: notes || null,
-    },
-  });
-
-  await appendAuditEvent({
-    actorUserId: session.userId,
-    action: "TEST_RECORD",
-    entityType: "LabResult",
-    entityId: lab.id,
-    organizationId: cb.id,
-    after: { productId, pass, labName },
-  });
-
-  return NextResponse.json({ ok: true, applicationId: application.id, id: lab.id }, { status: 201 });
+async function recordTest() {
+  return fail("Record the laboratory, the sample, and each requirement on the product in the certification desk");
 }
 
 async function issueCertificate(session: AuthedSession, body: Record<string, unknown>) {
@@ -315,6 +228,9 @@ async function decideCustoms(session: AuthedSession, body: Record<string, unknow
     after: { productId, decision, originIso2, destinationIso2 },
   });
 
+  await queueCustomsDecision({ clearanceId: row.id, productId, decision, reason });
+  await notifyAfterCommit();
+
   return NextResponse.json({ ok: true, id: row.id }, { status: 201 });
 }
 
@@ -356,6 +272,11 @@ async function recordInspection(session: AuthedSession, body: Record<string, unk
     after: { productId, result },
   });
 
+  if (result === "NON_CONFORM") {
+    await queueInspectionNonConform({ inspectionId: row.id, productId, findings });
+    await notifyAfterCommit();
+  }
+
   return NextResponse.json({ ok: true, id: row.id }, { status: 201 });
 }
 
@@ -366,7 +287,10 @@ async function openSurveillance(session: AuthedSession, body: Record<string, unk
   if (!title || !summary) return fail("Title and summary are required");
 
   const pin = pinCode
-    ? await prisma.productPin.findUnique({ where: { pinCode } })
+    ? await prisma.productPin.findUnique({
+        where: { pinCode },
+        include: { coc: { include: { application: true } } },
+      })
     : null;
   if (pinCode && !pin) return fail("PIN not found");
 
@@ -387,6 +311,14 @@ async function openSurveillance(session: AuthedSession, body: Record<string, unk
     organizationId: membershipOrgId(session, ["MARKET_SURVEILLANCE"]),
     after: { title, pinCode: pin?.pinCode ?? null },
   });
+
+  await queueSurveillanceOpened({
+    caseId: row.id,
+    title,
+    pinCode: pin?.pinCode,
+    cbOrgId: pin?.coc?.application.organizationId ?? null,
+  });
+  await notifyAfterCommit();
 
   return NextResponse.json({ ok: true, id: row.id }, { status: 201 });
 }
@@ -425,6 +357,14 @@ async function fileComplaint(body: Record<string, unknown>) {
     entityId: complaint.id,
     organizationId: routedCbId,
   });
+
+  await queueComplaintEmails({
+    complaintId: complaint.id,
+    email,
+    subject,
+    routedCbId,
+  });
+  await notifyAfterCommit();
 
   return NextResponse.json({
     ok: true,

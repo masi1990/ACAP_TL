@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { isLocale, type Locale } from "@/lib/i18n";
 import { CrudForm } from "@/components/admin/crud-form";
+import { FlowNav } from "@/components/flow-nav";
 
 export default async function ConsumersPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale: raw } = await params;
@@ -20,6 +21,7 @@ export default async function ConsumersPage({ params }: { params: Promise<{ loca
       <div>
         <p className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">Consumers</p>
         <h1 className="mt-2 font-[family-name:var(--font-display)] text-3xl sm:text-4xl">Report a product</h1>
+        <FlowNav locale={locale} current="consumers" />
         <p className="mt-2 text-sm text-[var(--muted)]">
           If a product carries a PIN, include it so the complaint reaches the certification body that
           issued the certificate. You can also check a PIN on the{" "}

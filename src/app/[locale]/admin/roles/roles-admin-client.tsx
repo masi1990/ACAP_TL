@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,6 +41,50 @@ type UserRow = {
   }>;
 };
 
+function RoleGroup({
+  title,
+  roles,
+  selectedCode,
+  onSelect,
+}: {
+  title: string;
+  roles: RoleRow[];
+  selectedCode: string | null;
+  onSelect: (code: string) => void;
+}) {
+  return (
+    <div>
+      <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">{title}</p>
+      {roles.length === 0 ? (
+        <p className="px-2 py-2 text-xs text-[var(--muted)]">None</p>
+      ) : (
+        <ul className="space-y-0.5">
+          {roles.map((role) => (
+            <li key={role.id}>
+              <button
+                type="button"
+                onClick={() => onSelect(role.code)}
+                className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-2 text-left hover:bg-[var(--surface-2)] ${
+                  selectedCode === role.code ? "bg-[var(--surface-2)] font-medium" : ""
+                }`}
+              >
+                <span className="min-w-0">
+                  <span className="block text-sm">{role.name}</span>
+                  <span className="block truncate font-mono text-[10px] text-[var(--muted)]">{role.code}</span>
+                </span>
+                <span className="flex shrink-0 items-center gap-1">
+                  {role.isSystem && <Badge tone="ok">sys</Badge>}
+                  <span className="text-[10px] text-[var(--muted)]">{role._count.assignments}</span>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function parsePerms(json: string): string[] {
   try {
     return JSON.parse(json) as string[];
@@ -53,6 +97,8 @@ export function RolesAdminClient({
   initialRoles,
   initialAssignments,
   users,
+  organizations,
+  assignAnyOrganization,
   allPermissions,
   canWrite,
   canAssign,
@@ -60,6 +106,8 @@ export function RolesAdminClient({
   initialRoles: RoleRow[];
   initialAssignments: AssignmentRow[];
   users: UserRow[];
+  organizations: Array<{ id: string; name: string; type: string }>;
+  assignAnyOrganization: boolean;
   allPermissions: Permission[];
   canWrite: boolean;
   canAssign: boolean;
@@ -67,6 +115,13 @@ export function RolesAdminClient({
   const router = useRouter();
   const [roles, setRoles] = useState(initialRoles);
   const [assignments, setAssignments] = useState(initialAssignments);
+
+  useEffect(() => {
+    setRoles(initialRoles);
+  }, [initialRoles]);
+  useEffect(() => {
+    setAssignments(initialAssignments);
+  }, [initialAssignments]);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -95,7 +150,11 @@ export function RolesAdminClient({
 
   const assignUser = users.find((u) => u.id === assignUserId);
   const assignRole = roles.find((r) => r.code === assignRoleCode);
-  const orgOptions = assignUser?.memberships.map((m) => m.organization) || [];
+  const orgOptions = assignAnyOrganization
+    ? organizations
+    : assignUser?.memberships.map((m) => m.organization) || [];
+  const hubRoles = roles.filter((role) => role.scope === "GLOBAL");
+  const organisationRoles = roles.filter((role) => role.scope !== "GLOBAL");
 
   function toggleNewPerm(p: string) {
     setNewPerms((prev) => {
@@ -249,30 +308,20 @@ export function RolesAdminClient({
         <p className={`text-sm ${error ? "text-rose-700" : "text-emerald-800"}`}>{error || msg}</p>
       )}
 
-      <section className="grid gap-6 lg:grid-cols-[240px_1fr]">
-        <div className="panel max-h-[28rem] overflow-y-auto p-2">
-          <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
-            Role catalogue
-          </p>
-          <ul className="space-y-0.5">
-            {roles.map((r) => (
-              <li key={r.id}>
-                <button
-                  type="button"
-                  onClick={() => setSelectedCode(r.code)}
-                  className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-[var(--surface-2)] ${
-                    selectedCode === r.code ? "bg-[var(--surface-2)] font-medium" : ""
-                  }`}
-                >
-                  <span className="truncate font-mono text-xs">{r.code}</span>
-                  <span className="flex items-center gap-1">
-                    {r.isSystem && <Badge tone="ok">sys</Badge>}
-                    <span className="text-[10px] text-[var(--muted)]">{r._count.assignments}</span>
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
+      <section className="grid gap-6 lg:grid-cols-[22rem_1fr]">
+        <div className="panel space-y-4 p-2">
+          <RoleGroup
+            title="Hub"
+            roles={hubRoles}
+            selectedCode={selectedCode}
+            onSelect={setSelectedCode}
+          />
+          <RoleGroup
+            title="Organisation"
+            roles={organisationRoles}
+            selectedCode={selectedCode}
+            onSelect={setSelectedCode}
+          />
         </div>
 
         <div className="panel space-y-4 p-4">
@@ -439,12 +488,15 @@ export function RolesAdminClient({
                     </option>
                   ))}
                 </select>
+                {orgOptions.length === 0 && (
+                  <p className="text-xs text-[var(--muted)]">No organisation is available for this assignment.</p>
+                )}
               </div>
             )}
           </div>
           <Button
             type="button"
-            disabled={busy || !assignUserId || !assignRoleCode}
+            disabled={busy || !assignUserId || !assignRoleCode || (assignRole?.scope === "ORG" && !assignOrgId)}
             onClick={assignRoleFn}
           >
             Assign
@@ -481,7 +533,11 @@ export function RolesAdminClient({
                   <div className="text-xs text-[var(--muted)]">{a.user.email}</div>
                 </td>
                 <td className="px-4 py-2 font-mono text-xs">{a.roleCode}</td>
-                <td className="px-4 py-2 text-xs text-[var(--muted)]">{a.organizationId || "—"}</td>
+                <td className="px-4 py-2 text-xs text-[var(--muted)]">
+                  {a.organizationId
+                    ? organizations.find((org) => org.id === a.organizationId)?.name || a.organizationId
+                    : "—"}
+                </td>
                 <td className="px-4 py-2 text-xs">{new Date(a.grantedAt).toLocaleString()}</td>
                 <td className="px-4 py-2 text-right">
                   {canAssign && (

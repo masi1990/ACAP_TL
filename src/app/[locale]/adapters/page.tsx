@@ -1,6 +1,9 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
+import { getSessionUser } from "@/lib/auth";
+import { ClientRedirect } from "@/components/admin/client-redirect";
 import { isLocale, type Locale } from "@/lib/i18n";
+import { canOpenHubTools } from "@/lib/navigation";
 import { resolveTariffStandardsPack } from "@/lib/tariff";
 import { Badge } from "@/components/ui/badge";
 import { AdaptersClient } from "./adapters-client";
@@ -17,6 +20,9 @@ export default async function AdaptersPage({
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
   const locale = raw as Locale;
+  const session = await getSessionUser();
+  if (!session) return <ClientRedirect href={`/${locale}/login?next=/${locale}/adapters`} />;
+  if (!canOpenHubTools(session.user)) return <ClientRedirect href={`/${locale}/dashboard`} />;
   const sp = await searchParams;
   const rec = (sp.rec || "EAC").toUpperCase();
   const tariff = sp.tariff || (rec === "ECOWAS" ? "1006.30.00" : "1006.30");

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isLocale, t, type Locale } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
+import { PUBLIC_FLOW } from "@/components/flow-nav";
 
 export default async function HomePage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale: raw } = await params;
@@ -23,37 +24,24 @@ export default async function HomePage({ params }: { params: Promise<{ locale: s
             {t(locale, "tagline")}
           </p>
           <p className="rise-delay-2 mt-3 max-w-lg text-sm leading-relaxed text-[color-mix(in_oklab,#f4fff9_72%,transparent)] sm:text-base">
-            {t(locale, "heroSupport")} Look up tariffs, browse certified Quality / Eco Mark products,
-            and preview standards (Clause 1 Scope on the public store).
+            {t(locale, "heroSupport")} The public path runs from the standard in the webstore, through
+            the tariff line, to the certified-product register and the consumer. Officers sign in for
+            certification, the border, and surveillance.
           </p>
           <div className="rise-delay-2 mt-8 flex flex-wrap gap-3">
-            <Button asChild size="lg">
-              <Link href={`/${locale}/lookup`}>{t(locale, "ctaLookup")}</Link>
-            </Button>
-            <Button
-              asChild
-              size="lg"
-              variant="secondary"
-              className="border-white/20 bg-white/10 text-white hover:bg-white/20"
-            >
-              <Link href={`/${locale}/registry`}>{t(locale, "navRegistry")}</Link>
-            </Button>
-            <Button
-              asChild
-              size="lg"
-              variant="outline"
-              className="border-white/35 text-white hover:bg-white/10"
-            >
-              <Link href={`/${locale}/verify`}>{t(locale, "ctaVerify")}</Link>
-            </Button>
-            <Button
-              asChild
-              size="lg"
-              variant="outline"
-              className="border-white/35 text-white hover:bg-white/10"
-            >
-              <Link href={`/${locale}/store`}>{t(locale, "navStore")}</Link>
-            </Button>
+            {PUBLIC_FLOW.map((step, index) => (
+              <Button
+                key={step.id}
+                asChild
+                size="lg"
+                variant={index === 0 ? "default" : "outline"}
+                className={index === 0 ? undefined : "border-white/35 text-white hover:bg-white/10"}
+              >
+                <Link href={`/${locale}${step.path}`}>
+                  {index + 1}. {t(locale, step.label)}
+                </Link>
+              </Button>
+            ))}
           </div>
         </div>
       </section>

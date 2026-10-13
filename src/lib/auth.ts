@@ -1,8 +1,10 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { createHash, randomBytes } from "crypto";
 import bcrypt from "bcryptjs";
 import { prisma } from "./db";
 import { appendAuditEvent } from "./audit";
+import { can, isArsoAdmin } from "./rbac";
 
 export const IDLE_MS = 10 * 60 * 1000;
 /** Cookie may outlive idle; idle is enforced via Session.expiresAt in the DB. */
@@ -54,7 +56,7 @@ export async function destroySession() {
  * Read the current session. Safe to call from Server Components:
  * only reads cookies and updates DB activity — never mutates the cookie jar.
  */
-export async function getSessionUser() {
+export const getSessionUser = cache(async function getSessionUser() {
   const jar = await cookies();
   const token = jar.get(SESSION_COOKIE)?.value;
   if (!token) return null;
@@ -72,7 +74,7 @@ export async function getSessionUser() {
   if (!session) return null;
   const now = new Date();
   if (session.expiresAt < now) {
-    await prisma.session.delete({ where: { id: session.id } });
+    await prisma.session.deleteMany({ where: { id: session.id } });
     // Stale cookie is left in place; RSC cannot delete it. Logout / next login clears it.
     return null;
   }
@@ -89,17 +91,26 @@ export async function getSessionUser() {
     data: { lastActiveAt: now },
   });
   return session;
-}
+});
 
 export async function startImpersonation(supportUserId: string, targetUserId: string, reason: string) {
-  const support = await prisma.userAccount.findUnique({ where: { id: supportUserId } });
-  if (!support?.rolesGlobal.includes("ARSO_SUPPORT") && !support?.rolesGlobal.includes("ARSO_ADMIN")) {
+  const support = await prisma.userAccount.findUnique({
+    where: { id: supportUserId },
+    include: {
+      memberships: { include: { organization: true } },
+      roleAssignments: { include: { role: true } },
+    },
+  });
+  if (!support || !can(support, "impersonate")) {
     throw new Error("Impersonation not permitted");
   }
   if (!reason.trim()) throw new Error("Reason required");
-  const target = await prisma.userAccount.findUnique({ where: { id: targetUserId } });
+  const target = await prisma.userAccount.findUnique({
+    where: { id: targetUserId },
+    include: { roleAssignments: { select: { roleCode: true } } },
+  });
   if (!target) throw new Error("Target not found");
-  if (target.rolesGlobal.includes("ARSO_ADMIN") && support.id !== target.id) {
+  if (isArsoAdmin(target) && support.id !== target.id) {
     throw new Error("Cannot impersonate ARSO super-admins");
   }
   await destroySession();

@@ -10,7 +10,8 @@ import { getPesapalConfig } from "@/lib/pesapal";
  */
 export async function GET(req: NextRequest) {
   const orderTrackingId = req.nextUrl.searchParams.get("OrderTrackingId")?.trim() || "";
-  const locale = req.nextUrl.searchParams.get("locale")?.trim() || "en";
+  const rawLocale = req.nextUrl.searchParams.get("locale")?.trim() || "en";
+  const locale = rawLocale === "fr" || rawLocale === "pt" || rawLocale === "ar" || rawLocale === "en" ? rawLocale : "en";
   const origin = getPesapalConfig().appBaseUrl;
 
   if (!orderTrackingId) {

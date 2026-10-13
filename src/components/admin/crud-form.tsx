@@ -10,7 +10,7 @@ import { notifyCrud } from "@/components/ui/crud-notice";
 export type Field = {
   name: string;
   label: string;
-  type?: "text" | "textarea" | "number" | "select" | "multiselect" | "checkbox";
+  type?: "text" | "textarea" | "number" | "select" | "multiselect" | "checkbox" | "date";
   required?: boolean;
   placeholder?: string;
   options?: { value: string; label: string }[];
@@ -66,14 +66,7 @@ export function CrudForm({
   }
 
   function blankValues() {
-    const init: Record<string, string> = {};
-    for (const f of fields) {
-      if (f.type === "multiselect") continue;
-      if (f.hidden && f.defaultValue != null) init[f.name] = String(f.defaultValue);
-      else if (f.type === "checkbox") init[f.name] = "false";
-      else init[f.name] = "";
-    }
-    return init;
+    return initialValues();
   }
 
   const [values, setValues] = useState<Record<string, string>>(initialValues);
@@ -164,6 +157,11 @@ export function CrudForm({
               className="h-10 w-full rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 text-sm"
             >
               <option value="">Select…</option>
+              {(f.options || []).length === 0 && (
+                <option value="" disabled>
+                  Nothing to choose yet
+                </option>
+              )}
               {(f.options || []).map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
@@ -227,6 +225,7 @@ export function CrudForm({
               placeholder={f.placeholder}
             />
           )}
+          {f.help && f.type !== "multiselect" ? <p className="text-xs text-[var(--muted)]">{f.help}</p> : null}
         </div>
         );
       })}

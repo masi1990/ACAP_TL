@@ -12,9 +12,12 @@ model MemberState {
   id           String         @id
   iso2         String         @unique
   name         String
+  /// NORTH | WEST | CENTRAL | EAST | SOUTHERN
+  region       String         @default("")
   organizations Organization[]
   entryPoints  EntryPoint[]
   nationalRules NationalRule[]
+  recMemberships MemberStateRec[]
 }
 
 model Rec {
@@ -22,15 +25,36 @@ model Rec {
   code        String       @unique
   name        String
   tariffLines TariffLine[]
+  memberStates MemberStateRec[]
+}
+
+/// A country may belong to more than one REC. Membership sits on the country, not on each authority.
+model MemberStateRec {
+  memberStateId String
+  recId         String
+  memberState   MemberState @relation(fields: [memberStateId], references: [id], onDelete: Cascade)
+  rec           Rec         @relation(fields: [recId], references: [id], onDelete: Cascade)
+
+  @@id([memberStateId, recId])
 }
 
 model Organization {
   id             String                   @id @default(cuid())
   name           String
-  type           String // ARSO | CB | CLIENT | NSB | CUSTOMS | ENTRY_POINT_OP
+  type           String // ARSO | CB | NSB | REGULATOR | CUSTOMS | MARKET_SURVEILLANCE | ENTRY_POINT_OP | MANUFACTURER | IMPORTER | CLIENT
   memberStateId  String?
   memberState    MemberState?             @relation(fields: [memberStateId], references: [id])
   primaryAdminId String?
+  /// Accreditation body, for example KENAS, SADCAS, or EGAC.
+  accreditationBody String                @default("")
+  /// Accreditation reference, for example an ISO/IEC 17065 number.
+  accreditationRef  String                @default("")
+  contactEmail      String                @default("")
+  contactPhone      String                @default("")
+  addressLine       String                @default("")
+  website           String                @default("")
+  /// ACTIVE | SUSPENDED
+  status            String                @default("ACTIVE")
   createdAt      DateTime                 @default(now())
   memberships    OrganizationMembership[]
   entryPoints    EntryPoint[]
@@ -353,8 +377,42 @@ model CertificationApplication {
   coc               CoC?
   idempotencyKey    String?         @unique
   assessmentItems   AssessmentItem[]
+  testDossier       TestDossier?
+  dossierAttachments DossierAttachment[]
 
   @@unique([productId, standardVersionId])
+}
+
+/// Laboratory and sample for one product and one standard. The certificate reads this row.
+model TestDossier {
+  id                String                   @id @default(cuid())
+  applicationId     String                   @unique
+  application       CertificationApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  laboratoryName    String                   @default("")
+  accreditationRef  String                   @default("")
+  reportNo          String                   @default("")
+  sampleCode        String                   @default("")
+  batchOrLot        String                   @default("")
+  sampleDescription String                   @default("")
+  sampledAt         DateTime?
+  testedAt          DateTime?
+}
+
+/// One ARSO-CERT annex, or an extra file the officer adds. Annex codes are unique per application.
+model DossierAttachment {
+  id            String                   @id @default(cuid())
+  applicationId String
+  application   CertificationApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  kind          String // ANNEX | OTHER
+  annexCode     String?
+  title         String                   @default("")
+  filename      String
+  contentType   String
+  storageUri    String
+  uploadedAt    DateTime                 @default(now())
+
+  @@unique([applicationId, annexCode])
+  @@index([applicationId])
 }
 
 /// One row of the standard, a national regulation, or an extra requirement.
@@ -463,14 +521,22 @@ model FeeEvent {
 }
 
 model NotificationJob {
-  id        String    @id @default(cuid())
-  cocId     String
-  coc       CoC       @relation(fields: [cocId], references: [id])
-  kind      String // EXPIRY_REMINDER
-  monthsOut Int
+  id           String    @id @default(cuid())
+  cocId        String?
+  coc          CoC?      @relation(fields: [cocId], references: [id])
+  kind         String
+  monthsOut    Int?
+  entityType   String?
+  entityId     String?
+  payloadJson  String    @default("{}")
   scheduledFor DateTime
-  sentAt    DateTime?
-  status    String    @default("PENDING")
+  sentAt       DateTime?
+  status       String    @default("PENDING") // PENDING | SENT | FAILED
+  attempts     Int       @default(0)
+  lastError    String?
+  dedupeKey    String    @unique
+
+  @@index([status, scheduledFor])
 }
 
 model AuditEvent {
@@ -510,6 +576,7 @@ model Order {
   status       String // CART | CHECKOUT | PAID | FULFILLED | FAILED
   totalCents   Int               @default(0)
   currency     String            @default("USD")
+  locale       String            @default("en")
   createdAt    DateTime          @default(now())
   lines        OrderLine[]
   payments     PaymentAttempt[]

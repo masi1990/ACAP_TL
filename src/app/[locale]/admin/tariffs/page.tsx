@@ -4,6 +4,7 @@ import { getSessionUser } from "@/lib/auth";
 import { can } from "@/lib/rbac";
 import { isLocale, type Locale } from "@/lib/i18n";
 import { CrudForm, DeleteButton } from "@/components/admin/crud-form";
+import { ClientRedirect } from "@/components/admin/client-redirect";
 import { Badge } from "@/components/ui/badge";
 
 export default async function AdminTariffsPage({ params }: { params: Promise<{ locale: string }> }) {
@@ -11,7 +12,8 @@ export default async function AdminTariffsPage({ params }: { params: Promise<{ l
   if (!isLocale(raw)) notFound();
   const locale = raw as Locale;
   const session = await getSessionUser();
-  if (!session || !can(session.user, "tariffs:read")) notFound();
+  if (!session) return <ClientRedirect href={`/${locale}/login?next=/${locale}/admin/tariffs`} />;
+  if (!can(session.user, "tariffs:read")) notFound();
 
   const [rows, recs] = await Promise.all([
     prisma.tariffLine.findMany({

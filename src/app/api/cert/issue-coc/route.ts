@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       message: result.reused
         ? `CoC already issued (idempotent): ${result.coc.certificateNo}`
-        : `Issued ${result.coc.certificateNo} with PINs and expiry reminder jobs`,
+        : `Issued ${result.coc.certificateNo} with PINs and expiry reminders`,
       certificateNo: result.coc.certificateNo,
       reused: result.reused,
     });

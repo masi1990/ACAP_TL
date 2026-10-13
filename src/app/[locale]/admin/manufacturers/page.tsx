@@ -1,9 +1,12 @@
+import { Fragment } from "react";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { can } from "@/lib/rbac";
 import { isLocale, type Locale } from "@/lib/i18n";
+import { countryOptions } from "@/lib/countries";
 import { CrudForm, DeleteButton } from "@/components/admin/crud-form";
+import { ClientRedirect } from "@/components/admin/client-redirect";
 import { Badge } from "@/components/ui/badge";
 
 export default async function AdminManufacturersPage({
@@ -15,12 +18,13 @@ export default async function AdminManufacturersPage({
   if (!isLocale(raw)) notFound();
   const locale = raw as Locale;
   const session = await getSessionUser();
-  if (!session || !can(session.user, "manufacturer:read")) notFound();
+  if (!session) return <ClientRedirect href={`/${locale}/login?next=/${locale}/admin/manufacturers`} />;
+  if (!can(session.user, "manufacturer:read")) notFound();
 
-  const [rows, states] = await Promise.all([
+  const [rows, states, bodies] = await Promise.all([
     prisma.organization.findMany({
       where: {
-        type: { in: ["MANUFACTURER", "IMPORTER", "CLIENT", "CUSTOMS", "NSB", "MARKET_SURVEILLANCE"] },
+        type: { in: ["MANUFACTURER", "IMPORTER", "CLIENT"] },
       },
       include: {
         memberState: true,
@@ -30,18 +34,19 @@ export default async function AdminManufacturersPage({
       orderBy: { name: "asc" },
     }),
     prisma.memberState.findMany({ orderBy: { name: "asc" } }),
+    prisma.organization.findMany({ where: { type: "CB" }, orderBy: { name: "asc" } }),
   ]);
   const canWrite = can(session.user, "manufacturer:write");
   const canDelete = can(session.user, "manufacturer:delete");
+  const countries = countryOptions();
 
   return (
     <div className="space-y-8">
       <div>
         <h2 className="text-xl font-semibold">Chain organisations</h2>
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          Manufacturers and importers register products. Customs authorities, inspectorates, and
-          market surveillance authorities use the conformity chain. A primary login is optional and
-          stays limited to that organisation.
+        <p className="mt-1 max-w-2xl text-sm text-[var(--muted)]">
+          Add the certification body on the institution directory first. A manufacturer or importer
+          then chooses that body, which tests the product and issues the certificate.
         </p>
       </div>
 
@@ -59,20 +64,26 @@ export default async function AdminManufacturersPage({
               options: [
                 { value: "MANUFACTURER", label: "Manufacturer" },
                 { value: "IMPORTER", label: "Importer" },
-                { value: "CUSTOMS", label: "Customs authority" },
-                { value: "NSB", label: "Inspectorate" },
-                { value: "MARKET_SURVEILLANCE", label: "Market surveillance" },
               ],
             },
             { name: "name", label: "Organisation name", required: true },
-            { name: "legalName", label: "Legal company name", placeholder: "Same as org if blank" },
+            { name: "legalName", label: "Legal company name", placeholder: "Same as organisation if blank" },
             {
               name: "memberStateId",
               label: "Member state",
               type: "select",
+              required: true,
               options: states.map((s) => ({ value: s.id, label: `${s.name} (${s.iso2})` })),
             },
-            { name: "countryIso2", label: "Company country ISO2", defaultValue: "KE", placeholder: "KE" },
+            {
+              name: "servicingCbId",
+              label: "Certification body",
+              type: "select",
+              options: bodies.map((b) => ({ value: b.id, label: b.name })),
+              help: bodies.length
+                ? "The body that will certify this manufacturer or importer."
+                : "Add a certification body first.",
+            },
             { name: "adminEmail", label: "Primary admin email (optional)" },
             { name: "adminName", label: "Primary admin name" },
             {
@@ -104,27 +115,90 @@ export default async function AdminManufacturersPage({
                 </td>
               </tr>
             )}
-            {rows.map((r) => (
-              <tr key={r.id} className="border-b border-[var(--line)]/50">
-                <td className="px-4 py-3">
-                  <div className="font-medium">{r.name}</div>
-                  <div className="text-xs text-[var(--muted)]">
-                    {r.memberships.map((m) => m.user.email).join(", ") || "No users"}
-                  </div>
-                </td>
-                <td className="px-4 py-3">
-                  <Badge>{r.type}</Badge>
-                </td>
-                <td className="px-4 py-3">{r.memberState?.iso2 || "—"}</td>
-                <td className="px-4 py-3">
-                  {r.clientAccounts.flatMap((c) => c.companies.map((co) => co.legalName)).join(", ") ||
-                    "—"}
-                </td>
-                <td className="px-4 py-3 text-right">
-                  {canDelete && <DeleteButton action={`/api/admin/organizations/${r.id}`} />}
-                </td>
-              </tr>
-            ))}
+            {rows.map((r) => {
+              const company = r.clientAccounts.flatMap((account) => account.companies)[0];
+              const trade = r.type === "MANUFACTURER" || r.type === "IMPORTER" || r.type === "CLIENT";
+              return (
+                <Fragment key={r.id}>
+                  <tr className="border-b border-[var(--line)]/50">
+                    <td className="px-4 py-3">
+                      <div className="font-medium">{r.name}</div>
+                      <div className="text-xs text-[var(--muted)]">
+                        {r.memberships.map((m) => m.user.email).join(", ") || "No users"}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge>{r.type}</Badge>
+                    </td>
+                    <td className="px-4 py-3">{company?.countryIso2 || r.memberState?.iso2 || "—"}</td>
+                    <td className="px-4 py-3">{company?.legalName || "—"}</td>
+                    <td className="px-4 py-3 text-right">
+                      {canDelete && <DeleteButton action={`/api/admin/organizations/${r.id}`} />}
+                    </td>
+                  </tr>
+                  {canWrite && (
+                    <tr className="border-b border-[var(--line)]/50">
+                      <td colSpan={5} className="px-4 py-3">
+                        <details>
+                          <summary className="cursor-pointer text-sm text-[var(--accent)]">Edit organisation</summary>
+                          <div className="mt-3">
+                            <CrudForm
+                              key={`${r.id}-${r.name}-${company?.countryIso2 ?? ""}`}
+                              idPrefix={`org-${r.id}-`}
+                              method="PATCH"
+                              action={`/api/admin/organizations/${r.id}`}
+                              submitLabel="Save organisation"
+                              fields={[
+                                { name: "name", label: "Organisation name", required: true, defaultValue: r.name },
+                                {
+                                  name: "type",
+                                  label: "Type",
+                                  type: "select",
+                                  required: true,
+                                  defaultValue: r.type,
+                                  options: [
+                                    { value: "MANUFACTURER", label: "Manufacturer" },
+                                    { value: "IMPORTER", label: "Importer" },
+                                  ],
+                                },
+                                {
+                                  name: "legalName",
+                                  label: "Legal company name",
+                                  defaultValue: company?.legalName || r.name,
+                                },
+                                {
+                                  name: "countryIso2",
+                                  label: "Country",
+                                  type: "select",
+                                  required: trade,
+                                  options: countries,
+                                  defaultValue: company?.countryIso2 || r.memberState?.iso2 || "",
+                                  help: "Any country. An importer does not have to be in a member state.",
+                                },
+                                {
+                                  name: "memberStateId",
+                                  label: "Member state",
+                                  type: "select",
+                                  options: states.map((state) => ({ value: state.id, label: `${state.name} (${state.iso2})` })),
+                                  defaultValue: r.memberStateId || "",
+                                },
+                                {
+                                  name: "servicingCbId",
+                                  label: "Certification body",
+                                  type: "select",
+                                  options: bodies.map((body) => ({ value: body.id, label: body.name })),
+                                  defaultValue: r.servicingCbId || "",
+                                },
+                              ]}
+                            />
+                          </div>
+                        </details>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { appendAuditEvent } from "@/lib/audit";
 import { sha256 } from "@/lib/auth";
 import { requirePermission } from "@/lib/require-auth";
+import { notifyAfterCommit, queueSanction, queueSurveillanceOpened } from "@/lib/notifications";
 
 export async function POST(req: NextRequest) {
   const auth = await requirePermission("surveillance:operate");
@@ -11,7 +12,10 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const pinCode = String(body.pinCode || "").trim();
   const pin = pinCode
-    ? await prisma.productPin.findUnique({ where: { pinCode }, include: { coc: true } })
+    ? await prisma.productPin.findUnique({
+        where: { pinCode },
+        include: { coc: { include: { application: true } } },
+      })
     : null;
   if (pinCode && !pin) {
     return NextResponse.json({ error: "PIN not found" }, { status: 400 });
@@ -79,6 +83,17 @@ export async function POST(req: NextRequest) {
     entityId: surveillanceCase.id,
     after: { cascade: !!body.cascade },
   });
+
+  await queueSurveillanceOpened({
+    caseId: surveillanceCase.id,
+    title: surveillanceCase.title,
+    pinCode: pin?.pinCode,
+    cbOrgId: pin?.coc?.application.organizationId ?? null,
+  });
+  if (body.cascade && pin?.cocId) {
+    await queueSanction({ caseId: surveillanceCase.id, cocId: pin.cocId, pinCode: pin.pinCode });
+  }
+  await notifyAfterCommit();
 
   return NextResponse.json({
     message: body.cascade

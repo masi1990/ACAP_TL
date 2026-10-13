@@ -1,6 +1,9 @@
 import { prisma } from "./db";
 import { appendAuditEvent } from "./audit";
 import { sha256 } from "./auth";
+import { dossierGaps } from "./dossier";
+import { enqueueNotification, NotificationKind, notifyAfterCommit } from "./notifications";
+import { assertCbMayGrantMark } from "./cb-licenses";
 import { randomBytes } from "crypto";
 
 /** ACID-critical: issue CoC once per application with idempotency + double-issue guard */
@@ -41,25 +44,29 @@ export async function issueCertificateOfConformity(input: {
       return { coc: app.coc, reused: true as const };
     }
 
-    const items = await tx.assessmentItem.findMany({
-      where: { applicationId: app.id },
-      include: { evidence: true },
-    });
-    if (items.length === 0) {
-      const tests = await tx.labResult.findMany({ where: { applicationId: app.id } });
-      if (tests.length !== 1 || !tests[0].pass) {
-        throw new Error("Record a pass for every requirement before a certificate can be issued");
-      }
-    } else {
-      const open = items.filter((item) => item.pass !== true);
-      if (open.length) {
-        throw new Error("Every requirement, national regulation, and other item must pass before a certificate can be issued");
-      }
-      const missingEvidence = items.filter((item) => item.kind === "table" && item.evidence.length === 0);
-      if (missingEvidence.length) {
-        throw new Error("Attach the laboratory result for every test in the standard tables");
-      }
+    const [items, dossier] = await Promise.all([
+      tx.assessmentItem.findMany({
+        where: { applicationId: app.id },
+        include: { evidence: true },
+      }),
+      tx.testDossier.findUnique({ where: { applicationId: app.id } }),
+    ]);
+    const gaps = dossierGaps(
+      dossier,
+      items.map((item) => ({
+        source: item.source,
+        kind: item.kind,
+        pass: item.pass,
+        measuredValue: item.measuredValue,
+        evidenceCount: item.evidence.length,
+      })),
+    );
+    if (gaps.length) {
+      throw new Error(`Still needed before a certificate can be issued: ${gaps.join("; ")}`);
     }
+
+    const mark = app.markScheme === "ECO" ? "ECO" : "QUALITY";
+    await assertCbMayGrantMark(app.organizationId, mark, tx);
 
     const months = input.validityMonths ?? 24;
     const issuedAt = new Date();
@@ -146,20 +153,50 @@ export async function issueCertificateOfConformity(input: {
       },
     });
 
-    // Expiry reminders 6/4/3/2/1 months
+    await enqueueNotification(
+      {
+        kind: NotificationKind.COC_ISSUED,
+        dedupeKey: `${NotificationKind.COC_ISSUED}:${coc.id}:now`,
+        cocId: coc.id,
+        entityType: "CoC",
+        entityId: coc.id,
+        scheduledFor: issuedAt,
+        payload: { certificateNo },
+      },
+      tx,
+    );
+
+    // Expiry reminders 6/4/3/2/1 months, plus the expiry day itself.
     for (const monthsOut of [6, 4, 3, 2, 1]) {
       const scheduledFor = new Date(expiresAt);
       scheduledFor.setMonth(scheduledFor.getMonth() - monthsOut);
-      await tx.notificationJob.create({
-        data: {
+      await enqueueNotification(
+        {
+          kind: NotificationKind.EXPIRY_REMINDER,
+          dedupeKey: `${NotificationKind.EXPIRY_REMINDER}:${coc.id}:${monthsOut}`,
           cocId: coc.id,
-          kind: "EXPIRY_REMINDER",
           monthsOut,
+          entityType: "CoC",
+          entityId: coc.id,
           scheduledFor,
-          status: "PENDING",
+          payload: { certificateNo },
         },
-      });
+        tx,
+      );
     }
+    await enqueueNotification(
+      {
+        kind: NotificationKind.COC_EXPIRED,
+        dedupeKey: `${NotificationKind.COC_EXPIRED}:${coc.id}:0`,
+        cocId: coc.id,
+        monthsOut: 0,
+        entityType: "CoC",
+        entityId: coc.id,
+        scheduledFor: expiresAt,
+        payload: { certificateNo },
+      },
+      tx,
+    );
 
     return { coc, reused: false as const };
   }).then(async (result) => {
@@ -171,6 +208,7 @@ export async function issueCertificateOfConformity(input: {
       entityId: result.coc.id,
       after: { certificateNo: result.coc.certificateNo, status: result.coc.status },
     });
+    if (!result.reused) await notifyAfterCommit();
     return result;
   });
 }

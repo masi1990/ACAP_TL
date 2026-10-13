@@ -1,8 +1,10 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
-import { ALL_PERMISSIONS, can } from "@/lib/rbac";
+import { ALL_PERMISSIONS, can, isArsoAdmin } from "@/lib/rbac";
+import { ensureSystemRoles } from "@/lib/system-roles";
 import { isLocale, type Locale } from "@/lib/i18n";
+import { ClientRedirect } from "@/components/admin/client-redirect";
 import { RolesAdminClient } from "./roles-admin-client";
 
 export default async function AdminRolesPage({ params }: { params: Promise<{ locale: string }> }) {
@@ -12,9 +14,12 @@ export default async function AdminRolesPage({ params }: { params: Promise<{ loc
   void locale;
 
   const session = await getSessionUser();
-  if (!session || !can(session.user, "roles:read")) notFound();
+  if (!session) return <ClientRedirect href={`/${locale}/login?next=/${locale}/admin/roles`} />;
+  if (!can(session.user, "roles:read")) notFound();
 
-  const [roles, assignments, users] = await Promise.all([
+  await ensureSystemRoles();
+
+  const [roles, assignments, users, organizations] = await Promise.all([
     prisma.roleDefinition.findMany({
       orderBy: [{ scope: "asc" }, { code: "asc" }],
       include: { _count: { select: { assignments: true } } },
@@ -38,6 +43,10 @@ export default async function AdminRolesPage({ params }: { params: Promise<{ loc
       },
       orderBy: { email: "asc" },
     }),
+    prisma.organization.findMany({
+      select: { id: true, name: true, type: true },
+      orderBy: { name: "asc" },
+    }),
   ]);
 
   return (
@@ -59,6 +68,8 @@ export default async function AdminRolesPage({ params }: { params: Promise<{ loc
           grantedAt: a.grantedAt.toISOString(),
         }))}
         users={users}
+        organizations={organizations}
+        assignAnyOrganization={isArsoAdmin(session.user)}
         allPermissions={ALL_PERMISSIONS}
         canWrite={can(session.user, "roles:write")}
         canAssign={can(session.user, "roles:assign")}

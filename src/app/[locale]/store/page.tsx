@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { isLocale, t, type Locale } from "@/lib/i18n";
 import { getPesapalConfig } from "@/lib/pesapal";
 import { getCatalogPreviewPayload } from "@/lib/store-preview-server";
+import { FlowNav } from "@/components/flow-nav";
 import { StoreCatalogItem } from "./store-catalog-item";
 import { StorePreviewOverlay } from "./store-preview-overlay";
 
@@ -42,6 +43,10 @@ export default async function StorePage({
       <h1 className="font-[family-name:var(--font-display)] text-3xl sm:text-4xl">
         {t(locale, "storeTitle")}
       </h1>
+      <p className="mt-2 max-w-2xl text-sm text-[var(--muted)]">
+        Step 1. A published African Standard is bought or previewed here before a product is certified against it.
+      </p>
+      <FlowNav locale={locale} current="store" />
 
       <div className="mt-8 grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
         <div className="space-y-4">

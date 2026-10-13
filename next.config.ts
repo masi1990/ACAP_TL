@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Nodemailer uses Node sockets. Keep it out of the server bundle.
+  serverExternalPackages: ["nodemailer"],
   // Dev hydration/HMR is blocked for hosts not listed here (Next 16+).
   // Localhost vs 127.0.0.1 and Cloudflare quick tunnels must be allowed.
   allowedDevOrigins: [

@@ -12,10 +12,14 @@ const PUBLIC_API_PREFIXES = [
   "/api/store/preview",
   "/api/store/preview-data",
   "/api/store/checkout",
+  "/api/store/download",
   "/api/store/pesapal",
   "/api/registry",
+  "/api/certificates",
   "/api/auth/login",
   "/api/chain/complaints",
+  "/api/auth/accept-invite",
+  "/api/jobs/dispatch",
 ];
 
 function isPublicApi(pathname: string) {
@@ -30,6 +34,8 @@ function isPublicLocalePath(pathname: string) {
   const rest = parts.slice(1).join("/");
   const suffix = rest ? `/${rest}` : "";
   if (suffix === "/certificates" || suffix.startsWith("/certificates/")) return true;
+  if (suffix === "/invite" || suffix.startsWith("/invite/")) return true;
+  if (suffix === "/api/store/download") return true;
   // Exact public page match (no nested public paths except store query overlays)
   return (PUBLIC_PATH_SUFFIXES as readonly string[]).some((p) => {
     if (p === "") return suffix === "";

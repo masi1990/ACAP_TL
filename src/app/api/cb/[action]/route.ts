@@ -7,7 +7,12 @@ import { appendAuditEvent } from "@/lib/audit";
 import { issueCertificateOfConformity } from "@/lib/coc";
 import { can } from "@/lib/rbac";
 import { requirePermission, type AuthedSession } from "@/lib/require-auth";
-import { extractAssessmentDrafts } from "@/lib/standard-assessment";
+import { annexTitle, INTERNAL_CERTIFICATE_KIND, isAnnexCode } from "@/lib/dossier";
+import { removeDossierFile, storeDossierFile } from "@/lib/dossier-files";
+import { isCountryCode } from "@/lib/countries";
+import { originClaimFromBody } from "@/lib/origin-claim";
+import { createTradeProduct, materializeStandardItems, resolveTariffLineId } from "@/lib/product-record";
+import { requestedClientMark } from "@/lib/cb-licenses";
 
 type Ctx = { params: Promise<{ action: string }> };
 
@@ -53,7 +58,7 @@ async function addClient(session: AuthedSession, body: Record<string, unknown>) 
   if (type !== "MANUFACTURER" && type !== "IMPORTER") {
     return fail("Client must be a manufacturer or an importer");
   }
-  if (!/^[A-Z]{2}$/.test(countryIso2)) return fail("Country must be a 2-letter code");
+  if (!isCountryCode(countryIso2)) return fail("Choose a country");
   const cb = cbId ? await prisma.organization.findUnique({ where: { id: cbId } }) : null;
   if (!cb || cb.type !== "CB") return fail("Choose the certification body that serves this client");
 
@@ -105,25 +110,24 @@ async function addProduct(session: AuthedSession, body: Record<string, unknown>)
   const company = client.clientAccounts.flatMap((a) => a.companies)[0];
   if (!company) return fail("This client has no company record");
 
-  const product = await prisma.product.create({
-    data: { companyId: company.id, name, commodity },
+  const claim = originClaimFromBody(body, { importer: client.type === "IMPORTER" });
+  let markScheme: "QUALITY" | "ECO" = "QUALITY";
+  try {
+    markScheme = requestedClientMark(body.markScheme);
+  } catch (err) {
+    return fail(err instanceof Error ? err.message : "Choose a mark");
+  }
+  const product = await createTradeProduct({
+    companyId: company.id,
+    name,
+    commodity,
+    standardVersionId,
+    machineDocJson: version.machineDocJson,
+    originClaimJson: JSON.stringify(claim),
+    tariffLineId: await resolveTariffLineId(standardVersionId, body.tariffLineId),
+    servicingCbId: cbId,
+    markScheme,
   });
-  await prisma.productStandardLink.create({
-    data: { productId: product.id, standardVersionId },
-  });
-  await prisma.productVariant.create({
-    data: { productId: product.id, sku: `SKU-${product.id.slice(-8).toUpperCase()}`, label: name },
-  });
-  const application = await prisma.certificationApplication.create({
-    data: {
-      productId: product.id,
-      organizationId: cbId,
-      standardVersionId,
-      status: "EVALUATION",
-      markScheme: "QUALITY",
-    },
-  });
-  await materialize(application.id, version.machineDocJson);
 
   await appendAuditEvent({
     actorUserId: session.userId,
@@ -136,32 +140,6 @@ async function addProduct(session: AuthedSession, body: Record<string, unknown>)
   return NextResponse.json({ ok: true, id: product.id }, { status: 201 });
 }
 
-async function materialize(applicationId: string, machineDocJson: string) {
-  const existing = await prisma.assessmentItem.count({ where: { applicationId, source: "STANDARD" } });
-  if (existing) return;
-  let machine: Parameters<typeof extractAssessmentDrafts>[0] = {};
-  try {
-    machine = JSON.parse(machineDocJson);
-  } catch {
-    machine = {};
-  }
-  const drafts = extractAssessmentDrafts(machine);
-  if (!drafts.length) return;
-  await prisma.assessmentItem.createMany({
-    data: drafts.map((d) => ({
-      applicationId,
-      source: "STANDARD",
-      kind: d.kind,
-      itemKey: d.itemKey,
-      section: d.section,
-      clause: d.clause,
-      heading: d.heading,
-      text: d.text,
-      testMethod: d.testMethod,
-      sortOrder: d.sortOrder,
-    })),
-  });
-}
 
 async function saveAssessment(session: AuthedSession, body: Record<string, unknown>) {
   const mode = String(body.mode || "save");
@@ -174,10 +152,12 @@ async function saveAssessment(session: AuthedSession, body: Record<string, unkno
     return fail("You can only record results for your certification body");
   }
 
+  if (mode === "dossier") return saveDossier(session, application, body);
+
   if (mode === "load") {
     const version = await prisma.standardVersion.findUnique({ where: { id: application.standardVersionId } });
     if (!version) return fail("Standard not found");
-    await materialize(application.id, version.machineDocJson);
+    await materializeStandardItems(application.id, version.machineDocJson);
     return NextResponse.json({ ok: true });
   }
 
@@ -222,10 +202,59 @@ async function saveAssessment(session: AuthedSession, body: Record<string, unkno
         measuredValue: String(row.measuredValue || ""),
         unit: String(row.unit || ""),
         notes: String(row.notes || ""),
+        testMethod: String(row.testMethod || ""),
       },
     });
   }
   return NextResponse.json({ ok: true });
+}
+
+function dayOrNull(value: unknown) {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) throw new Error("Use a date in the form YYYY-MM-DD");
+  const date = new Date(`${raw}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) throw new Error("Use a valid date");
+  return date;
+}
+
+async function saveDossier(
+  session: AuthedSession,
+  application: { id: string; organizationId: string },
+  body: Record<string, unknown>,
+) {
+  const laboratoryName = String(body.laboratoryName || "").trim();
+  const accreditationRef = String(body.accreditationRef || "").trim();
+  const reportNo = String(body.reportNo || "").trim();
+  const sampleCode = String(body.sampleCode || "").trim();
+  const batchOrLot = String(body.batchOrLot || "").trim();
+  const sampleDescription = String(body.sampleDescription || "").trim();
+  const sampledAt = dayOrNull(body.sampledAt);
+  const testedAt = dayOrNull(body.testedAt);
+  const data = {
+    laboratoryName,
+    accreditationRef,
+    reportNo,
+    sampleCode,
+    batchOrLot,
+    sampleDescription,
+    sampledAt,
+    testedAt,
+  };
+  const dossier = await prisma.testDossier.upsert({
+    where: { applicationId: application.id },
+    create: { applicationId: application.id, ...data },
+    update: data,
+  });
+  await appendAuditEvent({
+    actorUserId: session.userId,
+    action: "TEST_DOSSIER_SAVE",
+    entityType: "TestDossier",
+    entityId: dossier.id,
+    organizationId: application.organizationId,
+    after: { laboratoryName, reportNo, sampleCode },
+  });
+  return NextResponse.json({ ok: true, id: dossier.id });
 }
 
 async function issue(session: AuthedSession, body: Record<string, unknown>) {
@@ -245,21 +274,41 @@ async function issue(session: AuthedSession, body: Record<string, unknown>) {
   }
 }
 
+function ownsApplication(session: AuthedSession, organizationId: string) {
+  const cbId = actingCbId(session, organizationId);
+  return organizationId === cbId || can(session.user, "cb:write");
+}
+
 async function uploadEvidence(req: NextRequest) {
   const auth = await requirePermission("certify:operate");
   if (auth.error) return auth.error;
   const session = auth.session!;
   const form = await req.formData();
-  const itemId = String(form.get("assessmentItemId") || "");
   const file = form.get("file");
-  if (!itemId || !(file instanceof File)) return fail("Choose a laboratory file to attach");
+  if (!(file instanceof File) || file.size === 0) return fail("Choose a file to attach");
+
+  const itemId = String(form.get("assessmentItemId") || "");
+  if (itemId) return attachLaboratoryFile(session, itemId, file);
+
+  const applicationId = String(form.get("applicationId") || "");
+  const annexCode = String(form.get("annexCode") || "");
+  const title = String(form.get("title") || "").trim();
+  const kind = String(form.get("kind") || "");
+  if (applicationId && kind === INTERNAL_CERTIFICATE_KIND) {
+    return attachInternalCertificate(session, applicationId, file);
+  }
+  if (applicationId && annexCode) return attachAnnex(session, applicationId, annexCode, file);
+  if (applicationId && title) return attachOther(session, applicationId, title, file);
+  return fail("Choose a requirement, an annex, or a title for the other document");
+}
+
+async function attachLaboratoryFile(session: AuthedSession, itemId: string, file: File) {
   const item = await prisma.assessmentItem.findUnique({
     where: { id: itemId },
     include: { application: true },
   });
   if (!item) return fail("Requirement not found");
-  const cbId = actingCbId(session, item.application.organizationId);
-  if (item.application.organizationId !== cbId && !can(session.user, "cb:write")) {
+  if (!ownsApplication(session, item.application.organizationId)) {
     return fail("You can only attach evidence for your certification body");
   }
 
@@ -285,5 +334,143 @@ async function uploadEvidence(req: NextRequest) {
     organizationId: item.application.organizationId,
     after: { filename: evidence.filename, itemId: item.id },
   });
-  return NextResponse.json({ ok: true, id: evidence.id }, { status: 201 });
+  return NextResponse.json(
+    { ok: true, id: evidence.id, filename: evidence.filename, storageUri: evidence.storageUri },
+    { status: 201 },
+  );
+}
+
+async function loadOwnedApplication(session: AuthedSession, applicationId: string) {
+  const application = await prisma.certificationApplication.findUnique({ where: { id: applicationId } });
+  if (!application) return { error: fail("Application not found") };
+  if (!ownsApplication(session, application.organizationId)) {
+    return { error: fail("You can only attach files for your certification body") };
+  }
+  return { application };
+}
+
+async function attachAnnex(session: AuthedSession, applicationId: string, annexCode: string, file: File) {
+  if (!isAnnexCode(annexCode)) return fail("Unknown annex");
+  const owned = await loadOwnedApplication(session, applicationId);
+  if (owned.error) return owned.error;
+  const stored = await storeDossierFile(file);
+  const existing = await prisma.dossierAttachment.findFirst({
+    where: { applicationId, annexCode, kind: "ANNEX" },
+  });
+  const attachment = existing
+    ? await prisma.dossierAttachment.update({
+        where: { id: existing.id },
+        data: {
+          title: annexTitle(annexCode),
+          filename: stored.filename,
+          contentType: stored.contentType,
+          storageUri: stored.storageUri,
+          uploadedAt: new Date(),
+        },
+      })
+    : await prisma.dossierAttachment.create({
+        data: {
+          applicationId,
+          kind: "ANNEX",
+          annexCode,
+          title: annexTitle(annexCode),
+          filename: stored.filename,
+          contentType: stored.contentType,
+          storageUri: stored.storageUri,
+        },
+      });
+  if (existing && existing.storageUri !== stored.storageUri) await removeDossierFile(existing.storageUri);
+  await appendAuditEvent({
+    actorUserId: session.userId,
+    action: "DOSSIER_ANNEX_UPLOAD",
+    entityType: "DossierAttachment",
+    entityId: attachment.id,
+    organizationId: owned.application!.organizationId,
+    after: { annexCode, filename: attachment.filename },
+  });
+  return NextResponse.json(
+    { ok: true, id: attachment.id, filename: attachment.filename, annexCode, title: attachment.title },
+    { status: existing ? 200 : 201 },
+  );
+}
+
+async function attachInternalCertificate(session: AuthedSession, applicationId: string, file: File) {
+  const allowed =
+    file.type === "application/pdf" ||
+    file.type === "image/png" ||
+    file.type === "image/jpeg" ||
+    file.type === "image/webp" ||
+    /\.(pdf|png|jpe?g|webp)$/i.test(file.name);
+  if (!allowed) return fail("Upload a PDF or an image of the scanned certificate");
+  if (file.size > 15 * 1024 * 1024) return fail("The scanned certificate must be 15 MB or smaller");
+  const owned = await loadOwnedApplication(session, applicationId);
+  if (owned.error) return owned.error;
+  const stored = await storeDossierFile(file);
+  const existing = await prisma.dossierAttachment.findFirst({
+    where: { applicationId, kind: INTERNAL_CERTIFICATE_KIND },
+  });
+  const attachment = existing
+    ? await prisma.dossierAttachment.update({
+        where: { id: existing.id },
+        data: {
+          title: "Internal certificate",
+          filename: stored.filename,
+          contentType: stored.contentType,
+          storageUri: stored.storageUri,
+          uploadedAt: new Date(),
+          annexCode: INTERNAL_CERTIFICATE_KIND,
+        },
+      })
+    : await prisma.dossierAttachment.create({
+        data: {
+          applicationId,
+          kind: INTERNAL_CERTIFICATE_KIND,
+          annexCode: INTERNAL_CERTIFICATE_KIND,
+          title: "Internal certificate",
+          filename: stored.filename,
+          contentType: stored.contentType,
+          storageUri: stored.storageUri,
+        },
+      });
+  if (existing && existing.storageUri !== stored.storageUri) await removeDossierFile(existing.storageUri);
+  await appendAuditEvent({
+    actorUserId: session.userId,
+    action: "INTERNAL_CERTIFICATE_UPLOAD",
+    entityType: "DossierAttachment",
+    entityId: attachment.id,
+    organizationId: owned.application!.organizationId,
+    after: { filename: attachment.filename },
+  });
+  return NextResponse.json(
+    { ok: true, id: attachment.id, filename: attachment.filename, kind: INTERNAL_CERTIFICATE_KIND },
+    { status: existing ? 200 : 201 },
+  );
+}
+
+async function attachOther(session: AuthedSession, applicationId: string, title: string, file: File) {
+  const owned = await loadOwnedApplication(session, applicationId);
+  if (owned.error) return owned.error;
+  const stored = await storeDossierFile(file);
+  const attachment = await prisma.dossierAttachment.create({
+    data: {
+      applicationId,
+      kind: "OTHER",
+      title,
+      filename: stored.filename,
+      contentType: stored.contentType,
+      storageUri: stored.storageUri,
+    },
+  });
+  await appendAuditEvent({
+    actorUserId: session.userId,
+    action: "DOSSIER_OTHER_UPLOAD",
+    entityType: "DossierAttachment",
+    entityId: attachment.id,
+    organizationId: owned.application!.organizationId,
+    after: { title, filename: attachment.filename },
+  });
+  return NextResponse.json(
+    { ok: true, id: attachment.id, filename: attachment.filename, title: attachment.title },
+    { status: 201 },
+  );
 }

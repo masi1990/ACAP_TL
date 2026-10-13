@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { isLocale, t, type Locale } from "@/lib/i18n";
 import { Badge } from "@/components/ui/badge";
+import { FlowNav } from "@/components/flow-nav";
 import { VerifyForm } from "./verify-form";
 
 export default async function VerifyPage({
@@ -95,6 +96,7 @@ export default async function VerifyPage({
         {t(locale, "verifyTitle")}
       </h1>
       <p className="rise-delay mt-2 text-[var(--muted)]">{t(locale, "verifyHint")}</p>
+      <FlowNav locale={locale} current="verify" />
 
       <VerifyForm locale={locale} initialPin={pinCode} />
 

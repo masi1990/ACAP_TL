@@ -1,10 +1,10 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { can } from "@/lib/rbac";
 import { isLocale, type Locale } from "@/lib/i18n";
 import { Badge } from "@/components/ui/badge";
+import { ClientRedirect } from "@/components/admin/client-redirect";
 import { SurveillanceClient } from "./surveillance-client";
 
 export default async function SurveillancePage({
@@ -16,18 +16,9 @@ export default async function SurveillancePage({
   if (!isLocale(raw)) notFound();
   const locale = raw as Locale;
   const session = await getSessionUser();
-  if (!session || !can(session.user, "surveillance:operate")) {
-    return (
-      <div className="mx-auto max-w-3xl px-4 py-10">
-        <h1 className="font-[family-name:var(--font-display)] text-3xl">Market surveillance</h1>
-        <p className="mt-2 text-sm text-[var(--muted)]">
-          This desk is for market surveillance officers. Consumers can file a report without an account.
-        </p>
-        <Link className="mt-4 inline-block text-sm text-[var(--accent)] underline" href={`/${locale}/consumers`}>
-          Consumer complaints
-        </Link>
-      </div>
-    );
+  if (!session) return <ClientRedirect href={`/${locale}/login?next=/${locale}/surveillance`} />;
+  if (!can(session.user, "surveillance:operate")) {
+    return <ClientRedirect href={`/${locale}/dashboard`} />;
   }
 
   const [cases, complaints, frauds] = await Promise.all([
@@ -46,7 +37,7 @@ export default async function SurveillancePage({
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
       <h1 className="font-[family-name:var(--font-display)] text-3xl sm:text-4xl">
-        Market surveillance & consumer
+        Market surveillance
       </h1>
       <p className="mt-2 text-[var(--muted)]">
         QR/PIN verify feeds complaints to the certifying CB; cascading sanctions can suspend PIN, CoC, and marks.

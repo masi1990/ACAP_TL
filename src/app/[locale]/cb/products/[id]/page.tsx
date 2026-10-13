@@ -7,6 +7,11 @@ import { isLocale, type Locale } from "@/lib/i18n";
 import { ClientRedirect } from "@/components/admin/client-redirect";
 import { AssessmentBoard, type BoardItem } from "@/components/cb/assessment-board";
 
+function dayInput(value: Date | null) {
+  if (!value) return "";
+  return value.toISOString().slice(0, 10);
+}
+
 export default async function ProductAssessmentPage({
   params,
 }: {
@@ -29,6 +34,8 @@ export default async function ProductAssessmentPage({
           organization: true,
           coc: true,
           assessmentItems: { include: { evidence: true }, orderBy: { sortOrder: "asc" } },
+          testDossier: true,
+          dossierAttachments: { orderBy: { uploadedAt: "asc" } },
         },
       },
     },
@@ -69,12 +76,18 @@ export default async function ProductAssessmentPage({
   return (
     <main className="mx-auto max-w-6xl space-y-6 px-4 py-10">
       <div>
-        <Link className="text-sm text-[var(--accent)] underline" href={`/${locale}/cb/clients/${client.id}`}>
-          {client.name}
+        <Link className="text-sm text-[var(--accent)] underline" href={`/${locale}/cb#products`}>
+          Certification
         </Link>
         <h1 className="mt-2 text-2xl font-semibold">{product.name}</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          {standard ? `${standard.designation} — ${standard.titleEn}` : "No standard linked"}
+          {standard ? (
+            <Link className="text-[var(--accent)] underline" href={`/${locale}/cb/standards/${standard.id}`}>
+              {standard.designation} — {standard.titleEn}
+            </Link>
+          ) : (
+            "No standard linked"
+          )}
           {application.organization ? ` · ${application.organization.name}` : ""}
         </p>
       </div>
@@ -82,6 +95,27 @@ export default async function ProductAssessmentPage({
         locale={locale}
         applicationId={application.id}
         items={items}
+        dossier={
+          application.testDossier
+            ? {
+                laboratoryName: application.testDossier.laboratoryName,
+                accreditationRef: application.testDossier.accreditationRef,
+                reportNo: application.testDossier.reportNo,
+                sampleCode: application.testDossier.sampleCode,
+                batchOrLot: application.testDossier.batchOrLot,
+                sampleDescription: application.testDossier.sampleDescription,
+                sampledAt: dayInput(application.testDossier.sampledAt),
+                testedAt: dayInput(application.testDossier.testedAt),
+              }
+            : null
+        }
+        attachments={application.dossierAttachments.map((file) => ({
+          id: file.id,
+          kind: file.kind,
+          annexCode: file.annexCode,
+          title: file.title,
+          filename: file.filename,
+        }))}
         certificateNo={application.coc?.certificateNo ?? null}
       />
     </main>

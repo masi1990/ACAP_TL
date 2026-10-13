@@ -20,7 +20,7 @@ describe("tariff → standards pack", () => {
       await prisma.rec.upsert({
         where: { code: r.code },
         create: r,
-        update: { name: r.name },
+        update: {},
       });
     }
 

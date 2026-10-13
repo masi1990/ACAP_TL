@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/require-auth";
 import { appendAuditEvent } from "@/lib/audit";
-import { ALL_PERMISSIONS, type Permission } from "@/lib/rbac";
+import { ALL_PERMISSIONS, isArsoAdmin, type Permission } from "@/lib/rbac";
 
 type Ctx = { params: Promise<{ code: string }> };
 
@@ -31,15 +31,11 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const before = await prisma.roleDefinition.findUnique({ where: { code } });
   if (!before) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  if (before.isSystem && body.permissions != null) {
-    // System roles: allow description tweaks only unless ARSO_ADMIN resets from matrix
-    const isAdmin = auth.session!.user.rolesGlobal.includes("ARSO_ADMIN");
-    if (!isAdmin) {
-      return NextResponse.json(
-        { error: "System role permissions are locked — only ARSO_ADMIN may change them" },
-        { status: 403 },
-      );
-    }
+  if (before.isSystem && body.permissions != null && !isArsoAdmin(auth.session!.user)) {
+    return NextResponse.json(
+      { error: "System role permissions are locked — only ARSO_ADMIN may change them" },
+      { status: 403 },
+    );
   }
 
   let permissionsJson: string | undefined;

@@ -18,6 +18,7 @@ export async function POST(req: NextRequest) {
   const buyerEmail = String(body.buyerEmail || "").toLowerCase().trim();
   const buyerName = String(body.buyerName || "").trim();
   const buyerPhone = String(body.buyerPhone || "").replace(/[^\d+]/g, "");
+  const locale = ["en", "fr", "pt", "ar"].includes(String(body.locale || "")) ? String(body.locale) : "en";
 
   if (provider !== "PESAPAL") {
     return NextResponse.json({ error: "Pay with Pesapal to buy this standard" }, { status: 400 });
@@ -69,6 +70,7 @@ export async function POST(req: NextRequest) {
       status: "CHECKOUT",
       totalCents: item.priceCents,
       currency: item.currency,
+      locale,
       lines: {
         create: {
           catalogItemId: item.id,
@@ -122,7 +124,7 @@ export async function POST(req: NextRequest) {
       currency: item.currency,
       amount,
       description: `${item.standardVersion.editionLabel} — ${item.coverTitle}`.slice(0, 100),
-      callback_url: `${config.appBaseUrl}/api/store/pesapal/callback?locale=en`,
+      callback_url: `${config.appBaseUrl}/api/store/pesapal/callback?locale=${locale}`,
       notification_id: notificationId,
       billing_address: {
         email_address: buyerEmail,

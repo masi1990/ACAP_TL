@@ -6,7 +6,9 @@ import { getSessionUser } from "@/lib/auth";
 import { can } from "@/lib/rbac";
 import { isLocale, type Locale } from "@/lib/i18n";
 import { CrudForm, DeleteButton } from "@/components/admin/crud-form";
+import { ClientRedirect } from "@/components/admin/client-redirect";
 import { Badge } from "@/components/ui/badge";
+import { AUTHORITATIVE_LOCALES, PUBLICATION_STATUSES } from "@/lib/publication";
 import { formatCents } from "@/lib/utils";
 
 export default async function AdminStandardsPage({ params }: { params: Promise<{ locale: string }> }) {
@@ -14,7 +16,8 @@ export default async function AdminStandardsPage({ params }: { params: Promise<{
   if (!isLocale(raw)) notFound();
   const locale = raw as Locale;
   const session = await getSessionUser();
-  if (!session || !can(session.user, "standards:read")) notFound();
+  if (!session) return <ClientRedirect href={`/${locale}/login?next=/${locale}/admin/standards`} />;
+  if (!can(session.user, "standards:read")) notFound();
 
   const [rows, tariffs] = await Promise.all([
     prisma.standard.findMany({
@@ -80,6 +83,23 @@ export default async function AdminStandardsPage({ params }: { params: Promise<{
               { name: "designation", label: "Designation", required: true, placeholder: "ARS 464" },
               { name: "titleEn", label: "Title (EN)", required: true, placeholder: "Milled rice — Specification" },
               { name: "year", label: "Year", type: "number", defaultValue: new Date().getFullYear() },
+              { name: "editionLabel", label: "Edition label", placeholder: "ARS 464:2026" },
+              {
+                name: "publicationStatus",
+                label: "Publication status",
+                type: "select",
+                required: true,
+                defaultValue: "DRAFT",
+                options: PUBLICATION_STATUSES.map((s) => ({ value: s.value, label: s.label })),
+              },
+              {
+                name: "authoritativeLocale",
+                label: "Authoritative language",
+                type: "select",
+                required: true,
+                defaultValue: "en",
+                options: AUTHORITATIVE_LOCALES.map((s) => ({ value: s.value, label: s.label })),
+              },
               { name: "ics", label: "ICS", placeholder: "67.060", defaultValue: "67.060" },
               {
                 name: "scopeEn",
@@ -222,7 +242,18 @@ export default async function AdminStandardsPage({ params }: { params: Promise<{
                               {
                                 name: "publicationStatus",
                                 label: "Publication status",
+                                type: "select",
+                                required: true,
                                 defaultValue: v?.publicationStatus ?? "DRAFT",
+                                options: PUBLICATION_STATUSES.map((s) => ({ value: s.value, label: s.label })),
+                              },
+                              {
+                                name: "authoritativeLocale",
+                                label: "Authoritative language",
+                                type: "select",
+                                required: true,
+                                defaultValue: v?.authoritativeLocale ?? "en",
+                                options: AUTHORITATIVE_LOCALES.map((s) => ({ value: s.value, label: s.label })),
                               },
                               {
                                 name: "scopeEn",

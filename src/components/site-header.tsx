@@ -6,12 +6,30 @@ import { usePathname, useRouter } from "next/navigation";
 import { locales, t, type Locale, isLocale } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-/** Public nav always; Dashboard appears when signed in (auth-gated). */
-export function SiteHeader({ locale, signedIn = false }: { locale: Locale; signedIn?: boolean }) {
-  const pathname = usePathname();
+export type HeaderLink = { id: string; href: string; label: string };
+
+function linkActive(pathname: string, link: HeaderLink, homeHref: string) {
+  if (link.href === homeHref) return pathname === link.href || pathname === `${link.href}/`;
+  return pathname === link.href || pathname.startsWith(`${link.href}/`);
+}
+
+/** Public path always. Signed-in desks appear only when this session can open them. */
+export function SiteHeader({
+  locale,
+  signedIn = false,
+  publicLinks,
+  workLinks = [],
+}: {
+  locale: Locale;
+  signedIn?: boolean;
+  publicLinks: HeaderLink[];
+  workLinks?: HeaderLink[];
+}) {
+  const pathname = usePathname() || "";
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const base = pathname?.replace(/^\/(en|fr|pt|ar)/, "") || "";
+  const base = pathname.replace(/^\/(en|fr|pt|ar)/, "") || "";
+  const homeHref = `/${locale}`;
 
   async function signOut() {
     setBusy(true);
@@ -21,20 +39,28 @@ export function SiteHeader({ locale, signedIn = false }: { locale: Locale; signe
     router.refresh();
   }
 
-  const links = [
-    { href: `/${locale}`, label: t(locale, "navHome") },
-    { href: `/${locale}/lookup`, label: t(locale, "navLookup") },
-    { href: `/${locale}/verify`, label: t(locale, "navVerify") },
-    { href: `/${locale}/registry`, label: t(locale, "navRegistry") },
-    { href: `/${locale}/store`, label: t(locale, "navStore") },
-    { href: `/${locale}/chain`, label: t(locale, "navChain") },
-    { href: `/${locale}/cb`, label: t(locale, "navCertification") },
-    { href: `/${locale}/surveillance`, label: t(locale, "navSurveillance") },
-    { href: `/${locale}/consumers`, label: t(locale, "navConsumers") },
-    ...(signedIn
-      ? [{ href: `/${locale}/dashboard`, label: t(locale, "navDashboard") }]
-      : []),
-  ];
+  function renderLinks(links: HeaderLink[], compact = false) {
+    return links.map((link) => {
+      const active = linkActive(pathname, link, homeHref);
+      return (
+        <Link
+          key={link.href}
+          href={link.href}
+          aria-current={active ? "page" : undefined}
+          className={cn(
+            compact
+              ? "shrink-0 rounded-md px-2 py-1 text-xs"
+              : "rounded-md px-2.5 py-1.5 text-sm",
+            active
+              ? "bg-[var(--surface-2)] text-[var(--ink)]"
+              : "text-[var(--muted)] hover:text-[var(--ink)]",
+          )}
+        >
+          {link.label}
+        </Link>
+      );
+    });
+  }
 
   return (
     <header className="sticky top-0 z-40 border-b border-[var(--line)]/80 bg-[color-mix(in_oklab,var(--bg)_82%,transparent)] backdrop-blur-md">
@@ -48,18 +74,9 @@ export function SiteHeader({ locale, signedIn = false }: { locale: Locale; signe
           </span>
         </Link>
         <nav className="hidden items-center gap-1 md:flex">
-          {links.map((l) => (
-            <Link
-              key={l.href}
-              href={l.href}
-              className={cn(
-                "rounded-md px-2.5 py-1.5 text-sm text-[var(--muted)] transition-colors hover:text-[var(--ink)]",
-                pathname === l.href && "bg-[var(--surface-2)] text-[var(--ink)]",
-              )}
-            >
-              {l.label}
-            </Link>
-          ))}
+          {renderLinks(publicLinks)}
+          {workLinks.length > 0 && <span className="mx-1 h-4 w-px bg-[var(--line)]" aria-hidden />}
+          {renderLinks(workLinks)}
         </nav>
         <div className="flex items-center gap-2">
           <select
@@ -77,13 +94,7 @@ export function SiteHeader({ locale, signedIn = false }: { locale: Locale; signe
               </option>
             ))}
           </select>
-          <Link
-            href={signedIn ? `/${locale}/dashboard` : `/${locale}/login`}
-            className="rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-medium text-[var(--accent-fg)]"
-          >
-            {signedIn ? t(locale, "navDashboard") : t(locale, "login")}
-          </Link>
-          {signedIn && (
+          {signedIn ? (
             <button
               type="button"
               onClick={signOut}
@@ -92,19 +103,19 @@ export function SiteHeader({ locale, signedIn = false }: { locale: Locale; signe
             >
               {busy ? "…" : t(locale, "logout")}
             </button>
+          ) : (
+            <Link
+              href={`/${locale}/login`}
+              className="rounded-md bg-[var(--accent)] px-3 py-2 text-sm font-medium text-[var(--accent-fg)]"
+            >
+              {t(locale, "login")}
+            </Link>
           )}
         </div>
       </div>
       <nav className="flex gap-1 overflow-x-auto border-t border-[var(--line)]/60 px-4 py-2 md:hidden">
-        {links.map((l) => (
-          <Link
-            key={l.href}
-            href={l.href}
-            className="shrink-0 rounded-md px-2 py-1 text-xs text-[var(--muted)]"
-          >
-            {l.label}
-          </Link>
-        ))}
+        {renderLinks(publicLinks, true)}
+        {renderLinks(workLinks, true)}
       </nav>
     </header>
   );

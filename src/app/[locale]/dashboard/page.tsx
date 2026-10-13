@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
-import { can, permissionsForUser, SYSTEM_ROLE_DEFS } from "@/lib/rbac";
+import { permissionsForUser, roleLabel, SYSTEM_ROLE_DEFS } from "@/lib/rbac";
+import { publicNav, workNav } from "@/lib/navigation";
 import { isLocale, type Locale } from "@/lib/i18n";
 import { Badge } from "@/components/ui/badge";
 import { ClientRedirect } from "@/components/admin/client-redirect";
@@ -79,71 +80,8 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
     });
   }
 
-  const quickLinks = [
-    {
-      href: `/${locale}/admin`,
-      label: "Admin catalogue",
-      blurb: "Standards, RECs, tariffs, organisations",
-      show:
-        can(user, "standards:read") ||
-        can(user, "recs:read") ||
-        can(user, "tariffs:read") ||
-        can(user, "roles:read"),
-    },
-    {
-      href: `/${locale}/admin/roles`,
-      label: "Roles & RBAC",
-      blurb: "Role catalogue, permissions, assignments",
-      show: can(user, "roles:read"),
-    },
-    {
-      href: `/${locale}/admin/standards`,
-      label: "Standards",
-      blurb: "Create, import, multi-tariff maps, full preview",
-      show: can(user, "standards:read"),
-    },
-    {
-      href: `/${locale}/cb`,
-      label: "Certification desk",
-      blurb: "Clients, products, every requirement, laboratory evidence, certificate",
-      show: can(user, "certify:operate") || can(user, "clients:write"),
-    },
-    {
-      href: `/${locale}/chain`,
-      label: "Conformity chain",
-      blurb: "One standard, one test, one certificate, one product",
-      show:
-        can(user, "products:read") ||
-        can(user, "certify:operate") ||
-        can(user, "customs:decide") ||
-        can(user, "inspect:write") ||
-        can(user, "surveillance:operate"),
-    },
-    {
-      href: `/${locale}/consumers`,
-      label: "Consumers",
-      blurb: "Public complaint about a certified product",
-      show: true,
-    },
-    {
-      href: `/${locale}/portal`,
-      label: "Hub portal",
-      blurb: "Licences, applications, PINs, audit",
-      show: can(user, "portal:operate") || can(user, "standards:read"),
-    },
-    {
-      href: `/${locale}/lookup`,
-      label: "Tariff lookup",
-      blurb: "Public customs lookup (Clause 1 Scope)",
-      show: true,
-    },
-    {
-      href: `/${locale}/store`,
-      label: "Standards webstore",
-      blurb: "Public catalogue preview",
-      show: true,
-    },
-  ].filter((l) => l.show);
+  const workLinks = workNav(user, locale).filter((link) => link.id !== "dashboard");
+  const publicLinks = publicNav(locale).filter((link) => link.id !== "home");
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10">
@@ -246,8 +184,7 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
                 >
                   <div className="font-medium">{m.organization.name}</div>
                   <div className="text-xs text-[var(--muted)]">
-                    {m.organization.type} · membership role{" "}
-                    <span className="font-mono">{m.role}</span>
+                    {m.organization.type} · {roleLabel(m.role)}
                   </div>
                 </li>
               ))}
@@ -277,16 +214,36 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
       </section>
 
       <section className="mt-8">
-        <h2 className="text-lg font-semibold">Quick links</h2>
+        <h2 className="text-lg font-semibold">Your work</h2>
+        {workLinks.length === 0 ? (
+          <p className="mt-3 text-sm text-[var(--muted)]">No desks are open for the roles on this account.</p>
+        ) : (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {workLinks.map((link) => (
+              <Link
+                key={link.href}
+                href={link.href}
+                className="panel block p-4 transition hover:bg-[var(--surface-2)]"
+              >
+                <h3 className="font-medium text-[var(--ink)]">{link.label}</h3>
+                {link.blurb && <p className="mt-1 text-sm text-[var(--muted)]">{link.blurb}</p>}
+              </Link>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="mt-8">
+        <h2 className="text-lg font-semibold">Public path</h2>
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {quickLinks.map((l) => (
+          {publicLinks.map((link) => (
             <Link
-              key={l.href}
-              href={l.href}
+              key={link.href}
+              href={link.href}
               className="panel block p-4 transition hover:bg-[var(--surface-2)]"
             >
-              <h3 className="font-medium text-[var(--ink)]">{l.label}</h3>
-              <p className="mt-1 text-sm text-[var(--muted)]">{l.blurb}</p>
+              <h3 className="font-medium text-[var(--ink)]">{link.label}</h3>
+              {link.blurb && <p className="mt-1 text-sm text-[var(--muted)]">{link.blurb}</p>}
             </Link>
           ))}
         </div>

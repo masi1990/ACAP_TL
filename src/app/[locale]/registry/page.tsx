@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import { isLocale, t, type Locale } from "@/lib/i18n";
+import { FlowNav } from "@/components/flow-nav";
 import { RegistryClient } from "./registry-client";
 
 export default async function PublicRegistryPage({ params }: { params: Promise<{ locale: string }> }) {
@@ -16,6 +17,7 @@ export default async function PublicRegistryPage({ params }: { params: Promise<{
           {t(locale, "registryTitle")}
         </h1>
         <p className="mt-3 text-[var(--muted)]">{t(locale, "registryHint")}</p>
+        <FlowNav locale={locale} current="registry" />
         <p className="mt-2 text-sm text-[var(--muted)]">
           Products carry the <strong className="font-medium text-[var(--ink)]">ARSO Quality Mark</strong>{" "}
           and/or <strong className="font-medium text-[var(--ink)]">Eco Mark Africa</strong> after

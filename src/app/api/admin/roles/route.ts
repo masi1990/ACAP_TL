@@ -6,6 +6,7 @@ import { appendAuditEvent } from "@/lib/audit";
 import {
   ALL_PERMISSIONS,
   SYSTEM_ROLE_DEFS,
+  isArsoAdmin,
   type Permission,
 } from "@/lib/rbac";
 
@@ -77,7 +78,7 @@ export async function POST(req: NextRequest) {
 
   // Least privilege: custom roles cannot include roles:write or impersonate unless creator is ARSO_ADMIN
   const elevated = ["roles:write", "roles:assign", "impersonate"] as const;
-  const isAdmin = auth.session!.user.rolesGlobal.includes("ARSO_ADMIN");
+  const isAdmin = isArsoAdmin(auth.session!.user);
   if (!isAdmin && permissions.some((p) => elevated.includes(p as (typeof elevated)[number]))) {
     return NextResponse.json(
       { error: "Only ARSO_ADMIN may grant roles:write, roles:assign, or impersonate on a custom role" },

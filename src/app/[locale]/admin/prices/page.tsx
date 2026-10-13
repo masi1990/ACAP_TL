@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { can } from "@/lib/rbac";
 import { isLocale, type Locale } from "@/lib/i18n";
+import { ClientRedirect } from "@/components/admin/client-redirect";
 import { PriceTable, type PriceRow } from "./price-table";
 
 export default async function AdminPricesPage({ params }: { params: Promise<{ locale: string }> }) {
@@ -10,7 +11,8 @@ export default async function AdminPricesPage({ params }: { params: Promise<{ lo
   if (!isLocale(raw)) notFound();
   const locale = raw as Locale;
   const session = await getSessionUser();
-  if (!session || !can(session.user, "standards:read")) notFound();
+  if (!session) return <ClientRedirect href={`/${locale}/login?next=/${locale}/admin/prices`} />;
+  if (!can(session.user, "standards:read")) notFound();
 
   const versions = await prisma.standardVersion.findMany({
     include: { standard: true, catalogItem: true },

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isLocale, type Locale } from "@/lib/i18n";
 import { prisma } from "@/lib/db";
+import { isMailConfigured } from "@/lib/mail";
 
 export default async function StoreReturnPage({
   params,
@@ -68,16 +69,21 @@ export default async function StoreReturnPage({
         </p>
       )}
       {artifactUri && (
-        <p className="mt-6">
+        <div className="mt-6 space-y-3">
           <a
             className="inline-flex h-10 items-center justify-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white"
-            href={artifactUri}
+            href={orderId ? `/${locale}/api/store/download?order=${encodeURIComponent(orderId)}` : artifactUri}
             target="_blank"
             rel="noreferrer"
           >
             Download standard
           </a>
-        </p>
+          <p className="text-sm text-[var(--muted)]">
+            {isMailConfigured()
+              ? "The same download link was sent to the email address on this order."
+              : "Mail is not configured on this server, so the download link stays here until email can be sent."}
+          </p>
+        </div>
       )}
       <p className="mt-8">
         <Link href={`/${locale}/store`} className="text-sm text-[var(--accent)] underline">

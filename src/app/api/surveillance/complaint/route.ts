@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { appendAuditEvent } from "@/lib/audit";
+import { notifyAfterCommit, queueComplaintEmails } from "@/lib/notifications";
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
@@ -29,6 +30,13 @@ export async function POST(req: NextRequest) {
     entityId: complaint.id,
     organizationId: routedCbId,
   });
+  await queueComplaintEmails({
+    complaintId: complaint.id,
+    email: complaint.complainantEmail,
+    subject: complaint.subject,
+    routedCbId,
+  });
+  await notifyAfterCommit();
   return NextResponse.json({
     message: `Complaint filed and routed to CB ${routedCbId}`,
   });

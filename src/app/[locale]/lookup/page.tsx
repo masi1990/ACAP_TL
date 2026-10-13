@@ -6,6 +6,7 @@ import { isLocale, t, type Locale } from "@/lib/i18n";
 import { resolveTariffStandardsPack } from "@/lib/tariff";
 import { extractClause1ScopeOnly } from "@/lib/scope-text";
 import { Badge } from "@/components/ui/badge";
+import { FlowNav } from "@/components/flow-nav";
 import { LookupForm } from "./lookup-form";
 
 const PAGE_SIZE = 8;
@@ -202,6 +203,7 @@ export default async function LookupPage({
           {t(locale, "lookupTitle")}
         </h1>
         <p className="mt-2 text-[var(--muted)]">{t(locale, "lookupHint")}</p>
+        <FlowNav locale={locale} current="lookup" />
         <p className="mt-3 text-sm text-[var(--muted)]">
           Browse African Standards below (name and Scope). Use the tariff dropdown to{" "}
           <strong className="font-medium text-[var(--ink)]">search</strong> which standards apply to a

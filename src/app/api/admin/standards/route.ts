@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/require-auth";
 import { appendAuditEvent } from "@/lib/audit";
 import { assessMachinePackCompleteness } from "@/lib/fidelity";
+import { authoritativeLocaleOrNull, publicationStatusOrNull } from "@/lib/publication";
 
 export async function GET() {
   const auth = await requirePermission("standards:read");
@@ -35,6 +36,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "designation, titleEn, and scopeEn are required" }, { status: 400 });
   }
 
+  const publicationStatus =
+    body.publicationStatus != null && String(body.publicationStatus).trim()
+      ? publicationStatusOrNull(body.publicationStatus)
+      : "DRAFT";
+  if (!publicationStatus) {
+    return NextResponse.json({ error: "Choose a publication status from the list" }, { status: 400 });
+  }
+  const authoritativeLocale =
+    body.authoritativeLocale != null && String(body.authoritativeLocale).trim()
+      ? authoritativeLocaleOrNull(body.authoritativeLocale)
+      : "en";
+  if (!authoritativeLocale) {
+    return NextResponse.json({ error: "Choose a language from the list" }, { status: 400 });
+  }
+
   const editionLabel = String(body.editionLabel || `${designation}:${year}`).trim();
   const machine =
     body.machineDoc && typeof body.machineDoc === "object"
@@ -45,8 +61,8 @@ export async function POST(req: NextRequest) {
             year,
             editionLabel,
             effectiveFrom: new Date().toISOString().slice(0, 10),
-            publicationStatus: body.publicationStatus || "DRAFT",
-            authoritativeLocale: "en",
+            publicationStatus,
+            authoritativeLocale,
             sourcePdfUri: body.sourcePdfUri || null,
           },
           scope: { text: { en: scopeEn } },
@@ -91,8 +107,8 @@ export async function POST(req: NextRequest) {
           editionLabel,
           year,
           effectiveFrom: body.effectiveFrom ? new Date(body.effectiveFrom) : new Date(),
-          publicationStatus: body.publicationStatus || (completeness.ok ? "PUBLISHED" : "DRAFT_IMPORT"),
-          authoritativeLocale: "en",
+          publicationStatus,
+          authoritativeLocale,
           sourcePdfUri: body.sourcePdfUri || null,
           contentHash: machine.contentHash,
           scopeEn,

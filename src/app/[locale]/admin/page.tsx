@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
-import { can } from "@/lib/rbac";
+import { authorityOwnerStateIds, can } from "@/lib/rbac";
 import { isLocale, type Locale } from "@/lib/i18n";
 import { notFound } from "next/navigation";
 
@@ -16,7 +16,9 @@ export default async function AdminHomePage({ params }: { params: Promise<{ loca
     prisma.catalogItem.count({ where: { active: true, priceCents: { gt: 0 } } }),
     prisma.rec.count(),
     prisma.tariffLine.count(),
-    prisma.organization.count({ where: { type: "CB" } }),
+    prisma.organization.count({
+      where: { type: { in: ["CB", "NSB", "REGULATOR", "CUSTOMS", "MARKET_SURVEILLANCE", "ENTRY_POINT_OP"] } },
+    }),
     prisma.organization.count({
       where: { type: { in: ["MANUFACTURER", "IMPORTER", "CLIENT"] } },
     }),
@@ -25,52 +27,54 @@ export default async function AdminHomePage({ params }: { params: Promise<{ loca
 
   const cards = [
     {
-      title: "Standards",
-      count: standards,
-      href: `/${locale}/admin/standards`,
-      blurb: "One standard → many tariff lines. Import PDF/Word into a full machine pack; admin full preview is auth-only.",
-      show: session && can(session.user, "standards:read"),
-    },
-    {
-      title: "Price table",
-      count: priced,
-      href: `/${locale}/admin/prices`,
-      blurb: "Set a webstore price and currency for each uploaded standard.",
-      show: session && can(session.user, "standards:read"),
-    },
-    {
-      title: "RECs",
+      title: "1. RECs",
       count: recs,
       href: `/${locale}/admin/recs`,
-      blurb: "Regional Economic Communities (EAC, ECOWAS, COMESA, SADC, …).",
+      blurb: "Regional Economic Communities (EAC, ECOWAS, COMESA, SADC). Tariff codes belong to a REC.",
       show: session && can(session.user, "recs:read"),
     },
     {
-      title: "Tariff codes",
+      title: "2. Tariff codes",
       count: tariffs,
       href: `/${locale}/admin/tariffs`,
-      blurb: "HS lines per REC — map many codes to one standard version.",
+      blurb: "HS lines for each REC. A standard is mapped to these lines next.",
       show: session && can(session.user, "tariffs:read"),
     },
     {
-      title: "Manufacturer / importer",
+      title: "3. Standards",
+      count: standards,
+      href: `/${locale}/admin/standards`,
+      blurb: "Create or import the African Standard, set its publication status, and map it to tariff lines.",
+      show: session && can(session.user, "standards:read"),
+    },
+    {
+      title: "4. Price table",
+      count: priced,
+      href: `/${locale}/admin/prices`,
+      blurb: "Set a webstore price. Publishing is what puts the standard on the public store.",
+      show: session && can(session.user, "standards:read"),
+    },
+    {
+      title: "5. Institutions",
+      count: cbs,
+      href: `/${locale}/admin/institutions`,
+      blurb: "Authorities grouped by country. Each office keeps its own main account.",
+      show:
+        session &&
+        (can(session.user, "institutions:read") || authorityOwnerStateIds(session.user).length > 0),
+    },
+    {
+      title: "6. Manufacturer / importer",
       count: manufacturers,
       href: `/${locale}/admin/manufacturers`,
-      blurb: "Trade organisations that hold products and origin claims.",
+      blurb: "The company that will place a product on the market, linked to its certification body.",
       show: session && can(session.user, "manufacturer:read"),
     },
     {
-      title: "Certification bodies",
-      count: cbs,
-      href: `/${locale}/admin/certification-bodies`,
-      blurb: "Accredited CBs that evaluate and issue CoCs.",
-      show: session && can(session.user, "cb:read"),
-    },
-    {
-      title: "Roles & RBAC",
+      title: "7. Roles & RBAC",
       count: roles,
       href: `/${locale}/admin/roles`,
-      blurb: "Least-privilege role catalogue, assignments, and permission matrix.",
+      blurb: "Who may edit the catalogue, operate a certification body, or work the later desks.",
       show: session && can(session.user, "roles:read"),
     },
   ].filter((c) => c.show);
@@ -78,9 +82,8 @@ export default async function AdminHomePage({ params }: { params: Promise<{ loca
   return (
     <div className="space-y-6">
       <p className="max-w-2xl text-sm text-[var(--muted)]">
-        Demo catalogue data has been removed. Use these screens to add RECs, tariff lines, standards
-        (including PDF/Word import with fidelity checks), manufacturers/importers, and certification
-        bodies. Writes are audited and gated by role.
+        Follow the numbered steps. A tariff code needs a REC, a standard needs tariff lines, a
+        manufacturer needs a certification body, and the public pages then show that same record.
       </p>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {cards.map((c) => (

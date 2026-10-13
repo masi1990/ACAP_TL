@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { createSession, verifyPassword } from "@/lib/auth";
+import { SESSION_COOKIE, SESSION_COOKIE_MAX_AGE_S, createSession, verifyPassword } from "@/lib/auth";
 import { appendAuditEvent } from "@/lib/audit";
 
 export async function POST(req: NextRequest) {
@@ -15,12 +15,19 @@ export async function POST(req: NextRequest) {
     // stub: auto-verify on first successful login for pilot
     await prisma.userAccount.update({ where: { id: user.id }, data: { emailVerified: true } });
   }
-  await createSession(user.id);
+  const session = await createSession(user.id);
   await appendAuditEvent({
     actorUserId: user.id,
     action: "LOGIN",
     entityType: "UserAccount",
     entityId: user.id,
   });
-  return NextResponse.json({ ok: true, email: user.email });
+  const res = NextResponse.json({ ok: true, email: user.email });
+  res.cookies.set(SESSION_COOKIE, session.token, {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: SESSION_COOKIE_MAX_AGE_S,
+  });
+  return res;
 }

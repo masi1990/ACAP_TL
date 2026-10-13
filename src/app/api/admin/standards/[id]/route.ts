@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/require-auth";
 import { appendAuditEvent } from "@/lib/audit";
+import { authoritativeLocaleOrNull, publicationStatusOrNull } from "@/lib/publication";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -56,6 +57,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     (body.scopeEn != null ||
       body.editionLabel != null ||
       body.publicationStatus != null ||
+      body.authoritativeLocale != null ||
       body.year != null)
   ) {
     let machineDocJson: string | undefined;
@@ -73,12 +75,23 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       machine.scope = { ...scope, text: { ...(scope.text || {}), en: String(body.scopeEn) } };
       machineDocJson = JSON.stringify(machine);
     }
+    const publicationStatus =
+      body.publicationStatus != null ? publicationStatusOrNull(body.publicationStatus) : undefined;
+    if (body.publicationStatus != null && !publicationStatus) {
+      return NextResponse.json({ error: "Choose a publication status from the list" }, { status: 400 });
+    }
+    const authoritativeLocale =
+      body.authoritativeLocale != null ? authoritativeLocaleOrNull(body.authoritativeLocale) : undefined;
+    if (body.authoritativeLocale != null && !authoritativeLocale) {
+      return NextResponse.json({ error: "Choose a language from the list" }, { status: 400 });
+    }
     await prisma.standardVersion.update({
       where: { id: latest.id },
       data: {
         scopeEn: body.scopeEn != null ? String(body.scopeEn) : undefined,
         editionLabel: body.editionLabel != null ? String(body.editionLabel) : undefined,
-        publicationStatus: body.publicationStatus != null ? String(body.publicationStatus) : undefined,
+        publicationStatus: publicationStatus ?? undefined,
+        authoritativeLocale: authoritativeLocale ?? undefined,
         year: body.year != null && Number.isFinite(Number(body.year)) ? Number(body.year) : undefined,
         machineDocJson,
       },

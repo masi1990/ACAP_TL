@@ -3,22 +3,57 @@ import { randomBytes } from "crypto";
 import { prisma } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { appendAuditEvent } from "@/lib/audit";
+import { notifyAfterCommit, queueOrgInvite } from "@/lib/notifications";
+import { assignableOrgRoles, canAssignAcrossOrganisations, isAuthorityType } from "@/lib/rbac";
 
 export async function POST(req: NextRequest) {
   const session = await getSessionUser();
   if (!session) return NextResponse.json({ error: "Sign in required" }, { status: 401 });
-  const membership = session.user.memberships.find((m) =>
-    ["PRIMARY_ADMIN", "ORG_ADMIN"].includes(m.role),
-  );
-  if (!membership) {
-    return NextResponse.json({ error: "Primary admin / org admin required" }, { status: 403 });
-  }
   const body = await req.json();
   const email = String(body.email || "").toLowerCase().trim();
   const role = String(body.role || "ORG_USER");
+  const requestedOrg = body.organizationId ? String(body.organizationId).trim() : "";
+  const arso = canAssignAcrossOrganisations(session.user);
+
+  const requested = requestedOrg
+    ? await prisma.organization.findUnique({ where: { id: requestedOrg } })
+    : null;
+  const ownsRequested = session.user.memberships.some(
+    (item) => item.role === "PRIMARY_ADMIN" && item.organization.id === requestedOrg,
+  );
+  const ownsCountry =
+    !!requested &&
+    isAuthorityType(requested.type) &&
+    !!requested.memberStateId &&
+    session.user.memberships.some(
+      (item) =>
+        item.role === "PRIMARY_ADMIN" &&
+        isAuthorityType(item.organization.type) &&
+        item.organization.memberStateId === requested.memberStateId,
+    );
+  const ownMembership = session.user.memberships.find((item) => item.role === "PRIMARY_ADMIN");
+  const organizationId = arso && requestedOrg ? requestedOrg : ownsRequested || ownsCountry ? requestedOrg : ownMembership?.organization.id || "";
+  if (!organizationId || (!arso && requestedOrg && !ownsRequested && !ownsCountry)) {
+    return NextResponse.json({ error: "Only the main account can invite people into this organisation" }, { status: 403 });
+  }
+
+  const organization = requested?.id === organizationId ? requested : await prisma.organization.findUnique({ where: { id: organizationId } });
+  if (!organization) return NextResponse.json({ error: "Organisation not found" }, { status: 404 });
+  const roleDef = await prisma.roleDefinition.findUnique({ where: { code: role } });
+  if (!roleDef) {
+    return NextResponse.json({ error: "Choose a role" }, { status: 400 });
+  }
+  if (
+    !arso &&
+    (roleDef.scope !== "ORG" || role === "PRIMARY_ADMIN" || !assignableOrgRoles(organization.type).includes(role))
+  ) {
+    return NextResponse.json({ error: "Choose a role this organisation can grant" }, { status: 403 });
+  }
+  if (!email) return NextResponse.json({ error: "Email is required" }, { status: 400 });
+
   const invite = await prisma.invitation.create({
     data: {
-      organizationId: membership.organizationId,
+      organizationId,
       email,
       role,
       token: `invite-${randomBytes(8).toString("hex")}`,
@@ -32,10 +67,12 @@ export async function POST(req: NextRequest) {
     action: "ORG_INVITE",
     entityType: "Invitation",
     entityId: invite.id,
-    organizationId: membership.organizationId,
+    organizationId,
     after: { email, role },
   });
+  await queueOrgInvite(invite.id);
+  await notifyAfterCommit();
   return NextResponse.json({
-    message: `Invitation created for ${email} (email delivery stubbed). Token ${invite.token}`,
+    message: `Invitation emailed to ${email}.`,
   });
 }
