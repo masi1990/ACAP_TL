@@ -6,6 +6,17 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/require-auth";
 import { appendAuditEvent } from "@/lib/audit";
 import { convertUploadedStandard } from "@/lib/standard-import";
+import { authoritativeLocaleOrNull } from "@/lib/publication";
+import {
+  ensureAuthoritativeLanguageFile,
+  LANGUAGE_FILE_FIELDS,
+  parseIdList,
+  replaceStandardAdoptions,
+  requireTechnicalCommittee,
+  standardKindOrNull,
+  storeStandardPdf,
+  type LanguageCode,
+} from "@/lib/standard-meta";
 
 export const runtime = "nodejs";
 
@@ -38,6 +49,18 @@ export async function POST(req: NextRequest) {
     return s.split(",").map((x) => x.trim()).filter(Boolean);
   });
   const tariffLineIds = [...new Set(rawTariffIds)];
+  const kindRaw = String(form.get("kind") || "").trim();
+  const kind = kindRaw ? standardKindOrNull(kindRaw) : "PRODUCT";
+  const technicalCommitteeId = String(form.get("technicalCommitteeId") || "").trim();
+  const memberStateIds = parseIdList(form.get("memberStateIds"));
+  const authoritativeLocale = authoritativeLocaleOrNull(form.get("authoritativeLocale")) || "en";
+  const languageUploads: Partial<Record<LanguageCode, File>> = {};
+  for (const item of LANGUAGE_FILE_FIELDS) {
+    const extra = form.get(item.field);
+    if (extra instanceof File && extra.size > 0 && item.locale !== authoritativeLocale) {
+      languageUploads[item.locale] = extra;
+    }
+  }
 
   const buffer = Buffer.from(await file.arrayBuffer());
   if (buffer.byteLength > 40 * 1024 * 1024) {
@@ -100,6 +123,36 @@ export async function POST(req: NextRequest) {
   // Persist — require write permission in addition to import
   const writeAuth = await requirePermission("standards:write");
   if (writeAuth.error) return writeAuth.error;
+  if (!kind) {
+    return NextResponse.json({ error: "Choose a standard kind from the list" }, { status: 400 });
+  }
+  try {
+    await requireTechnicalCommittee(technicalCommitteeId);
+    if (memberStateIds.length) {
+      const found = await prisma.memberState.count({ where: { id: { in: memberStateIds } } });
+      if (found !== memberStateIds.length) {
+        throw new Error("Choose adopting countries from the African Union member states");
+      }
+    }
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Choose a technical committee" },
+      { status: 400 },
+    );
+  }
+  const storedLanguages: Partial<Record<LanguageCode, string>> = {};
+  try {
+    for (const item of LANGUAGE_FILE_FIELDS) {
+      const extra = languageUploads[item.locale];
+      if (!extra) continue;
+      storedLanguages[item.locale] = await storeStandardPdf(extra);
+    }
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Could not store a language PDF" },
+      { status: 400 },
+    );
+  }
 
   const designation = pack.standard.designation;
   const existing = await prisma.standard.findUnique({ where: { designation } });
@@ -123,6 +176,8 @@ export async function POST(req: NextRequest) {
       titleEn: pack.standard.title.en,
       ics: pack.standard.ics.join(",") || ics,
       publisher: pack.standard.publisher || "ARSO",
+      kind,
+      technicalCommitteeId,
       versions: {
         create: {
           id: verId,
@@ -130,7 +185,7 @@ export async function POST(req: NextRequest) {
           year: pack.version.year,
           effectiveFrom: new Date(pack.version.effectiveFrom),
           publicationStatus: completeness.ok ? "PUBLISHED" : "DRAFT_IMPORT",
-          authoritativeLocale: "en",
+          authoritativeLocale,
           sourcePdfUri: sourceUri,
           contentHash: pack.contentHash,
           scopeEn,
@@ -157,6 +212,17 @@ export async function POST(req: NextRequest) {
     },
     include: { versions: { include: { catalogItem: true } } },
   });
+
+  await ensureAuthoritativeLanguageFile(verId, authoritativeLocale, sourceUri);
+  for (const [locale, uri] of Object.entries(storedLanguages)) {
+    if (!uri) continue;
+    await prisma.standardLanguageFile.upsert({
+      where: { standardVersionId_locale: { standardVersionId: verId, locale } },
+      create: { standardVersionId: verId, locale, sourcePdfUri: uri },
+      update: { sourcePdfUri: uri },
+    });
+  }
+  await replaceStandardAdoptions(standard.id, memberStateIds);
 
   for (const tariffLineId of tariffLineIds) {
     await prisma.standardTariffMap.create({

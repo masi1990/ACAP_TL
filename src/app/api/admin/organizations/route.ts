@@ -8,6 +8,7 @@ import { AUTHORITY_TYPES, isAuthorityType, isTradeOrgType } from "@/lib/rbac";
 import { notifyAfterCommit, queueAccountWelcome } from "@/lib/notifications";
 import { saveCbMarkLicences } from "@/lib/cb-licenses";
 import { replaceOrgRole } from "@/lib/org-accounts";
+import { resolveInstitutionShape, saveCompanyCountries, saveOperatingCountries } from "@/lib/institution-shape";
 
 function profileFrom(body: Record<string, unknown>) {
   const status =
@@ -79,7 +80,16 @@ export async function POST(req: NextRequest) {
   if (!name) return NextResponse.json({ error: "name is required" }, { status: 400 });
 
   const memberStateId = body.memberStateId ? String(body.memberStateId) : null;
-  if (!memberStateId) {
+  const shape = await resolveInstitutionShape({
+    type,
+    backing: body.backing,
+    alsoCertifies: body.alsoCertifies,
+    memberStateId,
+    operatingCountryIds: body.operatingCountryIds,
+    requireCountry: authority || isTrade,
+  });
+  if (shape.error) return NextResponse.json({ error: shape.error }, { status: 400 });
+  if ((authority || isTrade) && shape.shape.backing !== "PRIVATE" && !shape.shape.memberStateId) {
     return NextResponse.json({ error: "Choose a member state" }, { status: 400 });
   }
   const memberState = memberStateId
@@ -130,7 +140,9 @@ export async function POST(req: NextRequest) {
     data: {
       name,
       type,
-      memberStateId,
+      memberStateId: shape.shape.memberStateId,
+      backing: shape.shape.backing,
+      alsoCertifies: shape.shape.alsoCertifies,
       primaryAdminId,
       servicingCbId,
       ...profile.data,
@@ -147,6 +159,10 @@ export async function POST(req: NextRequest) {
       }
       return NextResponse.json({ error: licence.error }, { status: 400 });
     }
+  }
+
+  if (shape.shape.operatingCountryIds.length) {
+    await saveOperatingCountries(org.id, shape.shape.operatingCountryIds);
   }
 
   if (primaryAdminId) {
@@ -172,6 +188,10 @@ export async function POST(req: NextRequest) {
         countryIso2: (memberState?.iso2 || String(body.countryIso2 || "")).toUpperCase().slice(0, 2) || "KE",
       },
     });
+    const company = await prisma.company.findFirst({ where: { clientAccountId: client.id } });
+    if (company && Array.isArray(body.operatingCountryIds)) {
+      await saveCompanyCountries(company.id, body.operatingCountryIds.map((id: unknown) => String(id)));
+    }
   }
 
   if (createdAccount && primaryAdminId && adminEmail) {

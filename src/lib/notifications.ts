@@ -10,6 +10,7 @@ const LICENSE_MONTHS = [6, 3, 1, 0] as const;
 export const NotificationKind = {
   ORG_INVITE: "ORG_INVITE",
   ACCOUNT_WELCOME: "ACCOUNT_WELCOME",
+  PASSWORD_RESET: "PASSWORD_RESET",
   COC_ISSUED: "COC_ISSUED",
   STORE_FULFILLED: "STORE_FULFILLED",
   COMPLAINT_RECEIVED: "COMPLAINT_RECEIVED",
@@ -21,6 +22,8 @@ export const NotificationKind = {
   EXPIRY_REMINDER: "EXPIRY_REMINDER",
   COC_EXPIRED: "COC_EXPIRED",
   CB_LICENSE_EXPIRY: "CB_LICENSE_EXPIRY",
+  LIBRARY_ROLE_ASSIGNED: "LIBRARY_ROLE_ASSIGNED",
+  LIBRARY_RELEASE: "LIBRARY_RELEASE",
 } as const;
 
 type JobDb = Prisma.TransactionClient | PrismaClient;
@@ -208,6 +211,16 @@ export async function queueOrgInvite(invitationId: string) {
   });
 }
 
+export async function queuePasswordReset(input: { resetId: string; email: string; name: string; token: string }) {
+  await enqueueNotification({
+    kind: NotificationKind.PASSWORD_RESET,
+    dedupeKey: `${NotificationKind.PASSWORD_RESET}:${input.resetId}`,
+    entityType: "PasswordReset",
+    entityId: input.resetId,
+    payload: { email: input.email, name: input.name, token: input.token },
+  });
+}
+
 export async function queueAccountWelcome(input: {
   userId: string;
   email: string;
@@ -227,6 +240,44 @@ export async function queueAccountWelcome(input: {
   });
 }
 
+export async function queueLibraryRoleAssigned(input: {
+  userId: string;
+  email: string;
+  name: string;
+  organizationName: string;
+}) {
+  await enqueueNotification({
+    kind: NotificationKind.LIBRARY_ROLE_ASSIGNED,
+    dedupeKey: `${NotificationKind.LIBRARY_ROLE_ASSIGNED}:${input.userId}:${Date.now()}`,
+    entityType: "UserAccount",
+    entityId: input.userId,
+    payload: input,
+  });
+}
+
+export async function queueLibraryRelease(input: {
+  releaseId: string;
+  email: string;
+  name: string;
+  token: string;
+  hasAccount: boolean;
+  titles: string[];
+}) {
+  await enqueueNotification({
+    kind: NotificationKind.LIBRARY_RELEASE,
+    dedupeKey: `${NotificationKind.LIBRARY_RELEASE}:${input.releaseId}`,
+    entityType: "LibraryRelease",
+    entityId: input.releaseId,
+    payload: {
+      email: input.email,
+      name: input.name,
+      token: input.token,
+      hasAccount: input.hasAccount ? "yes" : "no",
+      titles: input.titles.join(" | "),
+    },
+  });
+}
+
 export async function queueStoreFulfilled(input: {
   orderId: string;
   buyerEmail: string;
@@ -234,6 +285,9 @@ export async function queueStoreFulfilled(input: {
   title: string;
   artifactUri: string;
   locale?: string;
+  editionLocale?: string;
+  languages?: string[];
+  items?: { catalogItemId: string; title: string; languages: string[] }[];
 }) {
   const dedupeKey = `${NotificationKind.STORE_FULFILLED}:${input.orderId}:now`;
   const existing = await prisma.notificationJob.findUnique({ where: { dedupeKey } });
@@ -492,6 +546,52 @@ async function prepareJob(job: {
   switch (job.kind) {
     case NotificationKind.ORG_INVITE:
       return prepareInvite(job.entityId);
+    case NotificationKind.PASSWORD_RESET:
+      return {
+        recipients: onlyEmails([payload.email]),
+        subject: "Set your ACAP–TL password",
+        text: [
+          `Hello ${payload.name || payload.email},`,
+          "",
+          "Use this link to set your password. It expires in 24 hours.",
+          `${appBase()}/en/reset-password?token=${payload.token}`,
+        ].join("\n"),
+      };
+    case NotificationKind.LIBRARY_ROLE_ASSIGNED:
+      return {
+        recipients: onlyEmails([payload.email]),
+        subject: "Standards officer access",
+        text: [
+          `Hello ${payload.name || payload.email},`,
+          "",
+          `You are a standards officer for ${payload.organizationName || "your institution"}.`,
+          "This role is for harmonisation and adoption of African standards.",
+          `Sign in: ${appBase()}/en/login`,
+          "Then open Library under Standards.",
+        ].join("\n"),
+      };
+    case NotificationKind.LIBRARY_RELEASE: {
+      const titles = String(payload.titles || "")
+        .split("|")
+        .map((title) => title.trim())
+        .filter(Boolean);
+      const link = `${appBase()}/en/library/release/${payload.token}`;
+      return {
+        recipients: onlyEmails([payload.email]),
+        subject: "African standards ready for you",
+        text: [
+          `Hello ${payload.name || payload.email},`,
+          "",
+          payload.hasAccount === "yes"
+            ? "Sign in to download the standards ARSO selected for you. The link does not download the file by itself."
+            : "Create an account from this link, then request the standards officer role. The link does not download the file by itself.",
+          link,
+          titles.length ? `Standards: ${titles.join(", ")}` : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      };
+    }
     case NotificationKind.ACCOUNT_WELCOME:
       return {
         recipients: onlyEmails([payload.email]),
@@ -515,6 +615,62 @@ async function prepareJob(job: {
     case NotificationKind.STORE_FULFILLED: {
       const locale = isLocale(String(payload.locale || "")) ? String(payload.locale) : "en";
       const orderId = String(payload.orderId || "");
+      const names: Record<string, string> = {
+        en: "English",
+        fr: "French",
+        pt: "Portuguese",
+        ar: "Arabic",
+      };
+      const items = Array.isArray(payload.items)
+        ? payload.items.flatMap((entry) => {
+            const row = entry as { catalogItemId?: unknown; title?: unknown; languages?: unknown };
+            const catalogItemId = String(row.catalogItemId || "");
+            if (!catalogItemId) return [];
+            const languages = Array.isArray(row.languages)
+              ? row.languages.map((code) => String(code)).filter((code) => code in names)
+              : [];
+            return [{ catalogItemId, title: String(row.title || "ARSO standard"), languages }];
+          })
+        : [];
+      const linkFor = (catalogItemId: string, code: string) => {
+        const item = catalogItemId ? `&item=${encodeURIComponent(catalogItemId)}` : "";
+        return `${appBase()}/${locale}/api/store/download?order=${encodeURIComponent(orderId)}${item}&lang=${code}`;
+      };
+      if (items.length > 0) {
+        const blocks = items.flatMap((item) => {
+          const languages = item.languages.length > 0 ? item.languages : ["en"];
+          return [
+            item.title,
+            ...languages.map((code) => `${names[code] || code}: ${linkFor(item.catalogItemId, code)}`),
+            "",
+          ];
+        });
+        const subject =
+          items.length === 1
+            ? `Your standard is ready: ${items[0].title}`
+            : `Your standards are ready (${items.length})`;
+        return {
+          recipients: onlyEmails([payload.buyerEmail || payload.email]),
+          subject,
+          text: [
+            `Hello ${payload.buyerName || "there"},`,
+            "",
+            items.length === 1
+              ? `Payment for ${items[0].title} is complete.`
+              : `Payment for ${items.length} standards is complete.`,
+            "Choose the language you want to download:",
+            "",
+            ...blocks,
+          ].join("\n"),
+        };
+      }
+      const languages = Array.isArray(payload.languages)
+        ? payload.languages.map((code) => String(code)).filter((code) => code in names)
+        : [];
+      const links =
+        languages.length > 0
+          ? languages.map((code) => `${names[code]}: ${linkFor("", code)}`)
+          : [`Download: ${appBase()}/${locale}/api/store/download?order=${encodeURIComponent(orderId)}`];
       return {
         recipients: onlyEmails([payload.buyerEmail || payload.email]),
         subject: `Your standard is ready: ${payload.title || "ARSO standard"}`,
@@ -522,7 +678,8 @@ async function prepareJob(job: {
           `Hello ${payload.buyerName || "there"},`,
           "",
           `Payment for ${payload.title || "your standard"} is complete.`,
-          `Download: ${appBase()}/${locale}/api/store/download?order=${encodeURIComponent(orderId)}`,
+          "Choose the language you want to download:",
+          ...links,
         ].join("\n"),
       };
     }

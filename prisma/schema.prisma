@@ -18,6 +18,14 @@ model MemberState {
   entryPoints  EntryPoint[]
   nationalRules NationalRule[]
   recMemberships MemberStateRec[]
+  institutionRequests InstitutionRequest[]
+  standardAdoptions StandardAdoption[]
+  organizationCountries OrganizationCountry[]
+  companyCountries CompanyCountry[]
+  libraryAccess LibraryAccess[]
+  libraryAccessRequests LibraryAccessRequest[]
+  libraryStandardRequests LibraryStandardRequest[]
+  libraryReleases LibraryRelease[]
 }
 
 model Rec {
@@ -53,9 +61,20 @@ model Organization {
   contactPhone      String                @default("")
   addressLine       String                @default("")
   website           String                @default("")
-  /// ACTIVE | SUSPENDED
+  /// GOVERNMENT | PRIVATE. A national standards body is always GOVERNMENT.
+  backing           String                @default("GOVERNMENT")
+  /// Only a national standards body may also certify. A certification body cannot set this.
+  alsoCertifies     Boolean               @default(false)
+  /// ACTIVE | SUSPENDED | PENDING | REJECTED
   status            String                @default("ACTIVE")
   createdAt      DateTime                 @default(now())
+  operatingCountries OrganizationCountry[]
+  libraryAccess  LibraryAccess[]
+  libraryAccessRequests LibraryAccessRequest[]
+  libraryStandardRequests LibraryStandardRequest[]
+  libraryReleases LibraryRelease[]
+  staffPostings  StaffPosting[]
+  libraryActivities LibraryActivity[]
   memberships    OrganizationMembership[]
   entryPoints    EntryPoint[]
   cbLicenses     CbLicense[]
@@ -68,6 +87,9 @@ model Organization {
   servicingCbId  String?
   servicingCb    Organization?  @relation("CbClients", fields: [servicingCbId], references: [id])
   clients        Organization[] @relation("CbClients")
+  certifiedProducts Product[]   @relation("ProductCertifyingCb")
+  importedAsManufacturer ImportedCertifiedMark[] @relation("ImportedMarkManufacturer")
+  importedAsCertificationBody ImportedCertifiedMark[] @relation("ImportedMarkCb")
 }
 
 model UserAccount {
@@ -80,11 +102,21 @@ model UserAccount {
   /// Legacy comma-separated global roles (kept in sync with UserRoleAssignment for GLOBAL scope)
   rolesGlobal     String                   @default("")
   createdAt       DateTime                 @default(now())
+  mustChangePassword Boolean               @default(false)
   lastActiveAt    DateTime                 @default(now())
   memberships     OrganizationMembership[]
+  institutionRequests InstitutionRequest[]
+  passwordResets  PasswordReset[]
   sessions        Session[]
   invitationsSent Invitation[]             @relation("InvitedBy")
   roleAssignments UserRoleAssignment[]
+  recordedApplications CertificationApplication[] @relation("ApplicationRecorder")
+  recordedAssessmentItems AssessmentItem[] @relation("ItemRecorder")
+  libraryAccess LibraryAccess[]
+  libraryAccessRequests LibraryAccessRequest[]
+  staffPostings StaffPosting[]
+  libraryActivities LibraryActivity[]
+  libraryReleases LibraryRelease[]
 }
 
 /// Canonical RBAC role catalogue (system + custom). Permissions are least-privilege sets.
@@ -114,6 +146,203 @@ model UserRoleAssignment {
   @@unique([userId, roleCode, organizationId])
   @@index([userId])
   @@index([roleCode])
+}
+
+/// A manufacturer asks to become an institution. The manufacturer company stays; approval adds a new organisation on the same login.
+model InstitutionRequest {
+  id             String      @id @default(cuid())
+  userId         String
+  user           UserAccount @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  type           String
+  memberStateId  String
+  memberState    MemberState @relation(fields: [memberStateId], references: [id])
+  /// PENDING | APPROVED | REJECTED
+  status         String      @default("PENDING")
+  reviewedById   String?
+  reviewedAt     DateTime?
+  organizationId String?
+  createdAt      DateTime    @default(now())
+
+  @@index([userId, status])
+}
+
+model PasswordReset {
+  id        String      @id @default(cuid())
+  userId    String
+  user      UserAccount @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String      @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime    @default(now())
+
+  @@index([userId])
+}
+
+/// Countries where a private certification body operates. A government body keeps one home country on Organization.memberStateId.
+model OrganizationCountry {
+  organizationId String
+  memberStateId  String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  memberState    MemberState  @relation(fields: [memberStateId], references: [id], onDelete: Cascade)
+
+  @@id([organizationId, memberStateId])
+  @@index([memberStateId])
+}
+
+/// Countries where a company operates. Company.countryIso2 stays the country of registration.
+model CompanyCountry {
+  companyId     String
+  memberStateId String
+  company       Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  memberState   MemberState @relation(fields: [memberStateId], references: [id], onDelete: Cascade)
+
+  @@id([companyId, memberStateId])
+  @@index([memberStateId])
+}
+
+/// Standards-officer access for harmonisation and adoption. FULL is every published standard. RELEASE is only standards an admin has sent.
+model LibraryAccess {
+  id             String       @id @default(cuid())
+  userId         String
+  user           UserAccount  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  memberStateId  String
+  memberState    MemberState  @relation(fields: [memberStateId], references: [id])
+  /// FULL | RELEASE
+  scope          String
+  grantedById    String?
+  grantedAt      DateTime     @default(now())
+
+  @@unique([userId, organizationId, memberStateId])
+  @@index([userId])
+  @@index([organizationId])
+}
+
+/// A person asks to be a standards officer at an institution and country.
+model LibraryAccessRequest {
+  id             String       @id @default(cuid())
+  userId         String
+  user           UserAccount  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  memberStateId  String
+  memberState    MemberState  @relation(fields: [memberStateId], references: [id])
+  /// PENDING | APPROVED | REJECTED
+  status         String       @default("PENDING")
+  reviewedById   String?
+  reviewedAt     DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@index([userId, status])
+  @@index([status])
+}
+
+/// A request for particular African standards, from a signed-in officer or an email that may not have an account yet.
+model LibraryStandardRequest {
+  id             String                       @id @default(cuid())
+  email          String
+  name           String
+  userId         String?
+  organizationId String
+  organization   Organization                 @relation(fields: [organizationId], references: [id])
+  memberStateId  String
+  memberState    MemberState                  @relation(fields: [memberStateId], references: [id])
+  note           String                       @default("")
+  /// PENDING | SENT | REJECTED
+  status         String                       @default("PENDING")
+  reviewedById   String?
+  reviewedAt     DateTime?
+  createdAt      DateTime                     @default(now())
+  items          LibraryStandardRequestItem[]
+  releases       LibraryRelease[]
+
+  @@index([status])
+  @@index([email])
+}
+
+model LibraryStandardRequestItem {
+  id        String                 @id @default(cuid())
+  requestId String
+  request   LibraryStandardRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  standardId String
+  standard  Standard               @relation(fields: [standardId], references: [id])
+
+  @@unique([requestId, standardId])
+}
+
+/// An email of selected standards. The token opens account creation or sign-in. It does not serve the PDF.
+model LibraryRelease {
+  id             String               @id @default(cuid())
+  email          String
+  token          String               @unique
+  organizationId String
+  organization   Organization         @relation(fields: [organizationId], references: [id])
+  memberStateId  String
+  memberState    MemberState          @relation(fields: [memberStateId], references: [id])
+  userId         String?
+  user           UserAccount?         @relation(fields: [userId], references: [id])
+  requestId      String?
+  request        LibraryStandardRequest? @relation(fields: [requestId], references: [id])
+  sentAt         DateTime             @default(now())
+  items          LibraryReleaseItem[]
+
+  @@index([email])
+  @@index([userId])
+}
+
+model LibraryReleaseItem {
+  id         String         @id @default(cuid())
+  releaseId  String
+  release    LibraryRelease @relation(fields: [releaseId], references: [id], onDelete: Cascade)
+  standardId String
+  standard   Standard       @relation(fields: [standardId], references: [id])
+
+  @@unique([releaseId, standardId])
+}
+
+/// Where a staff member is posted. The institution's home country does not change.
+model StaffPosting {
+  id             String        @id @default(cuid())
+  userId         String
+  user           UserAccount   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  /// REGIONAL | BORDER | FOREIGN
+  kind           String
+  officeName     String        @default("")
+  entryPointId   String?
+  entryPoint     EntryPoint?   @relation(fields: [entryPointId], references: [id])
+  /// ISO country of the post. A foreign post need not be an African Union member.
+  countryIso2    String
+  createdAt      DateTime      @default(now())
+  activities     LibraryActivity[]
+
+  @@index([userId, organizationId])
+  @@index([entryPointId])
+}
+
+model LibraryActivity {
+  id             String        @id @default(cuid())
+  occurredAt     DateTime      @default(now())
+  userId         String?
+  user           UserAccount?  @relation(fields: [userId], references: [id])
+  roleCode       String        @default("")
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+  memberStateId  String?
+  postingId      String?
+  posting        StaffPosting? @relation(fields: [postingId], references: [id])
+  action         String
+  standardId     String?
+  standard       Standard?     @relation(fields: [standardId], references: [id])
+  language       String        @default("")
+  detail         String        @default("")
+
+  @@index([userId, occurredAt])
+  @@index([action])
+  @@index([organizationId])
 }
 
 model OrganizationMembership {
@@ -162,18 +391,63 @@ model EntryPoint {
   organizationId String?
   organization   Organization? @relation(fields: [organizationId], references: [id])
   locationNote   String?
+  staffPostings  StaffPosting[]
+}
+
+/// A sector groups technical committees. A committee belongs to one sector.
+model Sector {
+  id         String               @id @default(cuid())
+  code       String               @unique
+  name       String
+  createdAt  DateTime             @default(now())
+  committees TechnicalCommittee[]
+}
+
+/// A technical committee belongs to one sector and owns many standards.
+model TechnicalCommittee {
+  id        String     @id @default(cuid())
+  code      String     @unique
+  name      String
+  sectorId  String
+  sector    Sector     @relation(fields: [sectorId], references: [id], onDelete: Restrict)
+  standards Standard[]
+  createdAt DateTime   @default(now())
+
+  @@index([sectorId])
 }
 
 model Standard {
-  id          String            @id
-  designation String            @unique
-  titleEn     String
-  titleFr     String?
-  titlePt     String?
-  titleAr     String?
-  ics         String
-  publisher   String            @default("ARSO")
-  versions    StandardVersion[]
+  id                   String               @id
+  designation          String               @unique
+  titleEn              String
+  titleFr              String?
+  titlePt              String?
+  titleAr              String?
+  ics                  String
+  publisher            String               @default("ARSO")
+  /// PRODUCT | SERVICE | TESTING | REFERENCE
+  kind                 String               @default("PRODUCT")
+  technicalCommitteeId String?
+  technicalCommittee   TechnicalCommittee?  @relation(fields: [technicalCommitteeId], references: [id], onDelete: Restrict)
+  versions             StandardVersion[]
+  adoptions            StandardAdoption[]
+  libraryRequestItems  LibraryStandardRequestItem[]
+  libraryReleaseItems  LibraryReleaseItem[]
+  libraryActivities    LibraryActivity[]
+
+  @@index([kind])
+  @@index([technicalCommitteeId])
+}
+
+/// Countries that have adopted this standard. Rate is adopters / all member states.
+model StandardAdoption {
+  standardId    String
+  memberStateId String
+  standard      Standard    @relation(fields: [standardId], references: [id], onDelete: Cascade)
+  memberState   MemberState @relation(fields: [memberStateId], references: [id], onDelete: Cascade)
+
+  @@id([standardId, memberStateId])
+  @@index([memberStateId])
 }
 
 model StandardVersion {
@@ -200,6 +474,22 @@ model StandardVersion {
   productLinks         ProductStandardLink[]
   applications         CertificationApplication[]
   inspections          ConformityInspection[]
+  languageFiles        StandardLanguageFile[]
+  importedMarks        ImportedCertifiedMark[]
+}
+
+/// One published PDF for a language of a standard version.
+model StandardLanguageFile {
+  id                String          @id @default(cuid())
+  standardVersionId String
+  standardVersion   StandardVersion @relation(fields: [standardVersionId], references: [id], onDelete: Cascade)
+  /// en | fr | pt | ar
+  locale            String
+  sourcePdfUri      String
+  createdAt         DateTime        @default(now())
+
+  @@unique([standardVersionId, locale])
+  @@index([standardVersionId])
 }
 
 model TariffLine {
@@ -307,6 +597,7 @@ model Company {
   legalName       String
   countryIso2     String
   products        Product[]
+  operatingCountries CompanyCountry[]
 }
 
 model Product {
@@ -318,6 +609,8 @@ model Product {
   tariffLineId       String?
   tariffLine         TariffLine?            @relation(fields: [tariffLineId], references: [id])
   originClaimJson    String? // RulesOfOriginClaim
+  certifyingCbId     String?
+  certifyingCb       Organization?          @relation("ProductCertifyingCb", fields: [certifyingCbId], references: [id])
   variants           ProductVariant[]
   standardLinks      ProductStandardLink[]
   applications       CertificationApplication[]
@@ -327,10 +620,13 @@ model Product {
 
 model ProductStandardLink {
   id                String          @id @default(cuid())
-  productId         String          @unique
+  productId         String
   product           Product         @relation(fields: [productId], references: [id])
+  markScheme        String // QUALITY | ECO
   standardVersionId String
   standardVersion   StandardVersion @relation(fields: [standardVersionId], references: [id])
+
+  @@unique([productId, markScheme])
 }
 
 model ProductVariant {
@@ -367,10 +663,12 @@ model CertificationApplication {
   organization      Organization    @relation(fields: [organizationId], references: [id])
   standardVersionId String
   standardVersion   StandardVersion @relation(fields: [standardVersionId], references: [id])
-  status            String // DRAFT | EVALUATION | REVIEW | DECISION | CERTIFIED | REJECTED | WITHDRAWN
+  status            String // DRAFT | PENDING_APPROVAL | EVALUATION | REVIEW | DECISION | CERTIFIED | REJECTED | WITHDRAWN
   markScheme        String // QUALITY | ECO
   qualityApprovedAt DateTime?
   ecoApprovedAt     DateTime?
+  recordedById      String?
+  recordedBy        UserAccount? @relation("ApplicationRecorder", fields: [recordedById], references: [id], onDelete: SetNull)
   createdAt         DateTime        @default(now())
   labResults        LabResult[]
   attachments       Attachment[]
@@ -380,7 +678,7 @@ model CertificationApplication {
   testDossier       TestDossier?
   dossierAttachments DossierAttachment[]
 
-  @@unique([productId, standardVersionId])
+  @@unique([productId, markScheme])
 }
 
 /// Laboratory and sample for one product and one standard. The certificate reads this row.
@@ -434,6 +732,8 @@ model AssessmentItem {
   unit           String                   @default("")
   notes          String                   @default("")
   sortOrder      Int                      @default(0)
+  recordedById   String?
+  recordedBy     UserAccount?             @relation("ItemRecorder", fields: [recordedById], references: [id], onDelete: SetNull)
   evidence       LabEvidence[]
 
   @@unique([applicationId, itemKey])
@@ -562,6 +862,8 @@ model CatalogItem {
   standardVersion   StandardVersion @relation(fields: [standardVersionId], references: [id])
   priceCents        Int
   currency          String          @default("USD")
+  /// PAID | FREE_VIEW | FREE_DOWNLOAD
+  distribution      String          @default("PAID")
   coverTitle        String
   previewScopeOnly  Boolean         @default(true)
   active            Boolean         @default(true)
@@ -591,6 +893,8 @@ model OrderLine {
   catalogItem   CatalogItem @relation(fields: [catalogItemId], references: [id])
   unitPriceCents Int
   qty           Int         @default(1)
+  /// Language edition purchased. Separate from Order.locale, which is the buyer's site language.
+  editionLocale String      @default("en")
 }
 
 model PaymentAttempt {
@@ -631,9 +935,13 @@ model StandardEntitlement {
   order       Order    @relation(fields: [orderId], references: [id])
   buyerEmail  String
   catalogItemId String
+  /// Language edition of this download. One row per order, standard, and language.
+  editionLocale String  @default("en")
   grantedAt   DateTime @default(now())
   artifactUri String?
   watermarkText String?
+
+  @@unique([orderId, catalogItemId, editionLocale])
 }
 
 model WebhookOutbox {
@@ -745,6 +1053,80 @@ model RateLimitBucket {
   id        String   @id
   count     Int      @default(0)
   windowStart DateTime @default(now())
+}
+
+/// One mark copied from the live printing system. The standard link stays empty until someone sets it here.
+model ImportedCertifiedMark {
+  id                 String                   @id @default(cuid())
+  liveProductId      String
+  livePinId          String                   @unique
+  certificationId    String
+  pinText            String                   @unique
+  shortId            String?                  @unique
+  qrUrl              String
+  /// quality | eco
+  markType           String
+  productName        String
+  brand              String                   @default("")
+  companyName        String                   @default("")
+  country            String                   @default("")
+  cbName             String                   @default("")
+  markStatus         String
+  sourceStandardText String                   @default("")
+  issuedAt           DateTime?
+  expiresAt          DateTime?
+  standardVersionId  String?
+  standardVersion    StandardVersion?         @relation(fields: [standardVersionId], references: [id], onDelete: SetNull)
+  manufacturerOrgId  String?
+  manufacturerOrg    Organization?            @relation("ImportedMarkManufacturer", fields: [manufacturerOrgId], references: [id], onDelete: SetNull)
+  certificationBodyOrgId String?
+  certificationBodyOrg   Organization?        @relation("ImportedMarkCb", fields: [certificationBodyOrgId], references: [id], onDelete: SetNull)
+  importedAt         DateTime                 @default(now())
+  portalDecisions    ProductPortalDecision[]
+  relistRequests     PortalRelistRequest[]
+
+  @@index([liveProductId])
+  @@index([cbName])
+  @@index([standardVersionId])
+  @@index([manufacturerOrgId])
+  @@index([certificationBodyOrgId])
+  @@map("imported_certified_marks")
+}
+
+/// Append-only. The latest row for a PIN is whether that mark is on this hub's public registry.
+model ProductPortalDecision {
+  id            String                @id @default(cuid())
+  pinText       String
+  mark          ImportedCertifiedMark @relation(fields: [pinText], references: [pinText], onDelete: Cascade)
+  liveProductId String
+  cbName        String                @default("")
+  /// listed | removed
+  status        String
+  reason        String                @default("")
+  decidedById   String?
+  decidedAt     DateTime              @default(now())
+
+  @@index([pinText, decidedAt])
+  @@map("product_portal_decisions")
+}
+
+/// A certification body asks ARSO to list a removed mark again. Only ARSO can approve it.
+model PortalRelistRequest {
+  id          String                @id @default(cuid())
+  pinText     String
+  mark        ImportedCertifiedMark @relation(fields: [pinText], references: [pinText], onDelete: Cascade)
+  cbName      String                @default("")
+  requesterId String
+  reason      String
+  /// pending | approved | rejected
+  status      String                @default("pending")
+  arsoNote    String                @default("")
+  decidedById String?
+  decidedAt   DateTime?
+  createdAt   DateTime              @default(now())
+
+  @@index([pinText, status])
+  @@map("portal_relist_requests")
 }
 
 model PortfolioTransfer {

@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/require-auth";
 import { appendAuditEvent } from "@/lib/audit";
-import { assignableOrgRoles, canAssignAcrossOrganisations, isArsoAdmin, isAuthorityType, parseGlobalRoles } from "@/lib/rbac";
-import { removeOrgRole, replaceOrgRole } from "@/lib/org-accounts";
+import { assignableOrgRoles, canAssignAcrossOrganisations, isArsoAdmin, managesSameAuthorityType, parseGlobalRoles } from "@/lib/rbac";
+import { grantOrgRole, removeOrgRole } from "@/lib/org-accounts";
+import { appointStandardsOfficer } from "@/lib/library";
 
 type SessionUser = {
   rolesGlobal: string;
@@ -26,16 +27,8 @@ function orgRoleAllowed(
   const ownsOrg = actor.memberships.some(
     (item) => item.role === "PRIMARY_ADMIN" && item.organization.id === organization.id,
   );
-  const ownsCountry =
-    isAuthorityType(organization.type) &&
-    !!organization.memberStateId &&
-    actor.memberships.some(
-      (item) =>
-        item.role === "PRIMARY_ADMIN" &&
-        isAuthorityType(item.organization.type) &&
-        item.organization.memberStateId === organization.memberStateId,
-    );
-  if (!ownsOrg && !ownsCountry) return "You can add members only for your country";
+  const ownsType = managesSameAuthorityType(actor, organization);
+  if (!ownsOrg && !ownsType) return "You can add members only for your authority type";
   if (!assignableOrgRoles(organization.type).includes(roleCode)) {
     return "Choose a role this organisation can grant";
   }
@@ -93,14 +86,38 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  if (role.scope === "ORG" && organizationId && roleCode === "LIBRARY_OFFICER" && organization) {
+    const memberStateId =
+      organization.memberStateId ||
+      (
+        await prisma.organizationCountry.findFirst({
+          where: { organizationId },
+        })
+      )?.memberStateId;
+    if (!memberStateId) {
+      return NextResponse.json({ error: "This institution has no country" }, { status: 400 });
+    }
+    await appointStandardsOfficer({
+      userId,
+      organizationId,
+      memberStateId,
+      grantedById: auth.session!.userId,
+      scope: "FULL",
+    });
+  }
+
   const assignment =
     role.scope === "ORG" && organizationId
-      ? await replaceOrgRole({
-          userId,
-          organizationId,
-          roleCode,
-          grantedById: auth.session!.userId,
-        })
+      ? roleCode === "LIBRARY_OFFICER"
+        ? await prisma.userRoleAssignment.findFirst({
+            where: { userId, roleCode, organizationId },
+          })
+        : await grantOrgRole({
+            userId,
+            organizationId,
+            roleCode,
+            grantedById: auth.session!.userId,
+          })
       : (await prisma.userRoleAssignment.findFirst({
           where: { userId, roleCode, organizationId: null },
         })) ??
@@ -121,6 +138,10 @@ export async function POST(req: NextRequest) {
         data: { rolesGlobal: [...current, roleCode].join(",") },
       });
     }
+  }
+
+  if (!assignment) {
+    return NextResponse.json({ error: "Role was not assigned" }, { status: 500 });
   }
 
   await appendAuditEvent({

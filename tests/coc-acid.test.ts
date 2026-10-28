@@ -121,7 +121,7 @@ describe("CoC ACID paths", () => {
     await expect(issueCertificateOfConformity({ applicationId })).rejects.toThrow(/Still needed/);
   });
 
-  it("issues once when the dossier and table result are complete, even with no annexes", async () => {
+  it("issues once when the dossier is complete, even without a measured value, laboratory file, or annexes", async () => {
     if (skipReason) {
       console.warn(`skip: ${skipReason}`);
       return;
@@ -133,22 +133,6 @@ describe("CoC ACID paths", () => {
         reportNo: "R-1",
         sampleCode: "S-1",
         testedAt: new Date("2026-10-01T00:00:00.000Z"),
-      },
-    });
-    await expect(issueCertificateOfConformity({ applicationId })).rejects.toThrow(/measured value/i);
-
-    await prisma.assessmentItem.update({
-      where: { id: itemId },
-      data: { measuredValue: "9", unit: "%" },
-    });
-    await expect(issueCertificateOfConformity({ applicationId })).rejects.toThrow(/laboratory file/i);
-
-    await prisma.labEvidence.create({
-      data: {
-        assessmentItemId: itemId,
-        filename: "result.pdf",
-        contentType: "application/pdf",
-        storageUri: "test-result.pdf",
       },
     });
 

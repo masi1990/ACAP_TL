@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CrudForm } from "@/components/admin/crud-form";
 import { notifyCrud } from "@/components/ui/crud-notice";
+import { countryOptions } from "@/lib/countries";
 import { ANNEX_SOURCES, DOSSIER_ANNEXES, dossierGaps, INTERNAL_CERTIFICATE_KIND } from "@/lib/dossier";
 
 export type BoardItem = {
@@ -514,7 +515,13 @@ export function AssessmentBoard({
               { name: "mode", label: "Mode", defaultValue: "add", hidden: true },
               { name: "source", label: "Source", defaultValue: "NATIONAL", hidden: true },
               { name: "applicationId", label: "Application", defaultValue: applicationId, hidden: true },
-              { name: "countryIso2", label: "Country", required: true, placeholder: "KE" },
+              {
+                name: "countryIso2",
+                label: "Country",
+                type: "select",
+                required: true,
+                options: countryOptions(),
+              },
               { name: "heading", label: "Name of the regulation", required: true },
               { name: "text", label: "Description", type: "textarea", required: true },
             ]}

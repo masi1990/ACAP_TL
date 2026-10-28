@@ -31,10 +31,10 @@ export function NavTabs({ items }: { items: { href: string; label: string }[] })
             href={item.href}
             aria-current={selected ? "page" : undefined}
             className={cn(
-              "rounded-md border px-3 py-1.5 text-sm",
+              "rounded-md border px-3 py-1.5 text-base",
               selected
                 ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)]"
-                : "border-[var(--line)] bg-[var(--surface)] hover:bg-[var(--surface-2)]",
+                : "border-[var(--line)] bg-[var(--surface)] text-[var(--ink)] hover:bg-[var(--surface-2)]",
             )}
           >
             {item.label}

@@ -3,6 +3,15 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/require-auth";
 import { appendAuditEvent } from "@/lib/audit";
 import { authoritativeLocaleOrNull, publicationStatusOrNull } from "@/lib/publication";
+import {
+  attachLanguageFiles,
+  ensureAuthoritativeLanguageFile,
+  parseIdList,
+  readStandardPayload,
+  replaceStandardAdoptions,
+  requireTechnicalCommittee,
+  standardKindOrNull,
+} from "@/lib/standard-meta";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -13,9 +22,12 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
   const row = await prisma.standard.findUnique({
     where: { id },
     include: {
+      technicalCommittee: { include: { sector: true } },
+      adoptions: { include: { memberState: true } },
       versions: {
         include: {
           catalogItem: true,
+          languageFiles: true,
           tariffMaps: { include: { tariffLine: { include: { rec: true } } } },
         },
       },
@@ -29,9 +41,27 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   const auth = await requirePermission("standards:write");
   if (auth.error) return auth.error;
   const { id } = await ctx.params;
-  const body = await req.json();
+  const { body, files } = await readStandardPayload(req);
   const before = await prisma.standard.findUnique({ where: { id } });
   if (!before) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  let kind: string | undefined;
+  if (body.kind != null && String(body.kind).trim()) {
+    const parsed = standardKindOrNull(body.kind);
+    if (!parsed) return NextResponse.json({ error: "Choose a standard kind from the list" }, { status: 400 });
+    kind = parsed;
+  }
+  let technicalCommitteeId: string | undefined;
+  if (body.technicalCommitteeId !== undefined) {
+    try {
+      technicalCommitteeId = (await requireTechnicalCommittee(String(body.technicalCommitteeId || ""))).id;
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Choose a technical committee" },
+        { status: 400 },
+      );
+    }
+  }
 
   const row = await prisma.standard.update({
     where: { id },
@@ -43,6 +73,8 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       titleAr: body.titleAr === undefined ? undefined : body.titleAr,
       ics: body.ics != null ? String(body.ics).trim() : undefined,
       publisher: body.publisher != null ? String(body.publisher).trim() : undefined,
+      kind,
+      technicalCommitteeId,
     },
   });
 
@@ -85,6 +117,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     if (body.authoritativeLocale != null && !authoritativeLocale) {
       return NextResponse.json({ error: "Choose a language from the list" }, { status: 400 });
     }
+    const languageForSource = authoritativeLocale || latest.authoritativeLocale;
+    const matchedFile = await prisma.standardLanguageFile.findUnique({
+      where: { standardVersionId_locale: { standardVersionId: latest.id, locale: languageForSource } },
+    });
     await prisma.standardVersion.update({
       where: { id: latest.id },
       data: {
@@ -94,6 +130,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         authoritativeLocale: authoritativeLocale ?? undefined,
         year: body.year != null && Number.isFinite(Number(body.year)) ? Number(body.year) : undefined,
         machineDocJson,
+        sourcePdfUri: matchedFile?.sourcePdfUri,
       },
     });
   }
@@ -140,6 +177,31 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     }
   }
 
+  if (body.memberStateIds !== undefined) {
+    try {
+      await replaceStandardAdoptions(id, parseIdList(body.memberStateIds));
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Choose adopting countries from the list" },
+        { status: 400 },
+      );
+    }
+  }
+
+  if (latest && Object.keys(files).length) {
+    try {
+      const locale = authoritativeLocaleOrNull(body.authoritativeLocale) || latest.authoritativeLocale;
+      await attachLanguageFiles(latest.id, files, locale);
+      const version = await prisma.standardVersion.findUnique({ where: { id: latest.id } });
+      await ensureAuthoritativeLanguageFile(latest.id, locale, version?.sourcePdfUri);
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Could not save language files" },
+        { status: 400 },
+      );
+    }
+  }
+
   await appendAuditEvent({
     actorUserId: auth.session!.userId,
     action: "STANDARD_UPDATE",
@@ -166,6 +228,7 @@ export async function DELETE(_req: NextRequest, ctx: Ctx) {
       return NextResponse.json({ error: "Standard has certification applications — cannot delete" }, { status: 409 });
     }
     await prisma.standardTariffMap.deleteMany({ where: { standardVersionId: v.id } });
+    await prisma.standardLanguageFile.deleteMany({ where: { standardVersionId: v.id } });
     await prisma.catalogItem.deleteMany({ where: { standardVersionId: v.id } });
     await prisma.nationalRuleLink.deleteMany({ where: { standardVersionId: v.id } });
     await prisma.productStandardLink.deleteMany({ where: { standardVersionId: v.id } });

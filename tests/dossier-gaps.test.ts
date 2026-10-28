@@ -19,7 +19,7 @@ describe("dossier gaps", () => {
     ]);
   });
 
-  it("asks for a measured value and a laboratory file on table rows", () => {
+  it("does not ask for a measured value or a laboratory file on table rows", () => {
     const gaps = dossierGaps(dossier, [
       {
         source: "STANDARD",
@@ -29,10 +29,7 @@ describe("dossier gaps", () => {
         evidenceCount: 0,
       },
     ]);
-    expect(gaps).toEqual([
-      "A measured value on every test in the standard tables",
-      "A laboratory file on every test in the standard tables",
-    ]);
+    expect(gaps).toEqual([]);
   });
 
   it("is clear when every requirement passes and annexes are absent", () => {

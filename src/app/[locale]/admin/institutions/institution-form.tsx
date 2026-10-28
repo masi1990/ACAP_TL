@@ -29,6 +29,9 @@ export function InstitutionForm({
     addressLine?: string;
     website?: string;
     status?: string;
+    backing?: string;
+    alsoCertifies?: boolean;
+    operatingCountryIds?: string[];
     clientMarks?: string;
     licenseStatus?: string;
     licenseNumber?: string;
@@ -64,9 +67,42 @@ export function InstitutionForm({
     { name: "addressLine", label: "Address", defaultValue: defaults?.addressLine },
     { name: "website", label: "Website", defaultValue: defaults?.website },
   ];
+  if (type === "NSB") {
+    fields.push({
+      name: "alsoCertifies",
+      label: "This national standards body also certifies products",
+      type: "checkbox",
+      defaultValue: defaults?.alsoCertifies ? "true" : "false",
+      help: "The body stays a national standards body. A certification body cannot be marked as a standards body.",
+    });
+  }
+  if (type === "CB") {
+    fields.push(
+      {
+        name: "backing",
+        label: "Backing",
+        type: "select",
+        required: true,
+        defaultValue: defaults?.backing || "GOVERNMENT",
+        options: [
+          { value: "GOVERNMENT", label: "Government certification body" },
+          { value: "PRIVATE", label: "Private certification body" },
+        ],
+        help: "A private body, such as SGS or Bureau Veritas, can operate in more than one country.",
+      },
+      {
+        name: "operatingCountryIds",
+        label: "Countries of operation",
+        type: "multiselect",
+        options: stateOptions,
+        defaultValue: defaults?.operatingCountryIds || [],
+        help: "Required for a private certification body. A government body uses the country above.",
+      },
+    );
+  }
   if (method === "POST") {
     fields.push(
-      { name: "adminEmail", label: "Main account email", required: true },
+      { name: "adminEmail", label: "Main account email", required: true, help: "Use an existing person's email to create this institution for them. A new email creates a new account." },
       { name: "adminName", label: "Main account name" },
       { name: "adminPassword", label: "Temporary password", defaultValue: "ChangeMe!ACAP" },
     );

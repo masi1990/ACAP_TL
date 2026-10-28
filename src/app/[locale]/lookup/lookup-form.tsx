@@ -14,17 +14,21 @@ export type TariffOption = {
   description: string;
 };
 
+export type LookupRec = { code: string; name: string };
+
 /** Searchable tariff-code dropdown + Search submit (GET) */
 export function LookupForm({
   locale,
   initialRec,
   initialCode,
   options,
+  recs,
 }: {
   locale: Locale;
   initialRec: string;
   initialCode: string;
   options: TariffOption[];
+  recs: LookupRec[];
 }) {
   const router = useRouter();
   const [rec, setRec] = useState(initialRec);
@@ -90,10 +94,11 @@ export function LookupForm({
           onChange={(e) => onRecChange(e.target.value)}
           className="h-10 w-full rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 text-sm"
         >
-          <option value="COMESA">COMESA</option>
-          <option value="EAC">EAC</option>
-          <option value="SADC">SADC</option>
-          <option value="ECOWAS">ECOWAS</option>
+          {recs.map((item) => (
+            <option key={item.code} value={item.code}>
+              {item.name ? `${item.code} — ${item.name}` : item.code}
+            </option>
+          ))}
         </select>
       </div>
 

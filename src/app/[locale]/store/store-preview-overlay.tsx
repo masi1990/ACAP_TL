@@ -3,11 +3,15 @@
 import Link from "next/link";
 import { X } from "lucide-react";
 import type { BuiltStandardPreview } from "@/lib/standard-preview";
+import { t, isLocale, type Locale } from "@/lib/i18n";
 import { PreviewViewer } from "./preview-viewer";
 
 type CatalogPreviewPayload = BuiltStandardPreview & {
   catalogItemId: string | null;
   standardVersionId?: string;
+  editionLocale?: string;
+  openReading?: boolean;
+  allowDownload?: boolean;
   completeness?: { ok: boolean; checks: Array<{ id: string; label: string; present: boolean }> } | null;
 };
 
@@ -22,6 +26,17 @@ export function StorePreviewOverlay({
   closeHref?: string;
 }) {
   const close = closeHref ?? `/${locale}/store`;
+  const ui: Locale = isLocale(locale) ? locale : "en";
+  const languageName =
+    data.editionLocale === "fr"
+      ? t(ui, "French")
+      : data.editionLocale === "pt"
+        ? t(ui, "Portuguese")
+        : data.editionLocale === "ar"
+          ? t(ui, "Arabic")
+          : data.editionLocale
+            ? t(ui, "English")
+            : "";
 
   return (
     <div
@@ -38,7 +53,8 @@ export function StorePreviewOverlay({
                 id="store-preview-title"
                 className="font-[family-name:var(--font-display)] text-lg font-semibold"
               >
-                {data.editionLabel} — public preview
+                {data.editionLabel}
+                {languageName ? ` — ${languageName}` : data.openReading ? " — full text" : " — public preview"}
               </h2>
             </div>
             <Link

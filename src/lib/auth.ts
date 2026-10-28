@@ -65,7 +65,7 @@ export const getSessionUser = cache(async function getSessionUser() {
     include: {
       user: {
         include: {
-          memberships: { include: { organization: true } },
+          memberships: { include: { organization: { include: { memberState: true } } } },
           roleAssignments: { include: { role: true } },
         },
       },

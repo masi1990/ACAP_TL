@@ -57,12 +57,5 @@ export function dossierGaps(dossier: GapDossier, items: GapItem[]): string[] {
     return gaps;
   }
   if (items.some((item) => item.pass !== true)) gaps.push("A pass on every requirement");
-  const tables = items.filter((item) => item.source === "STANDARD" && item.kind === "table");
-  if (tables.some((item) => !item.measuredValue.trim())) {
-    gaps.push("A measured value on every test in the standard tables");
-  }
-  if (tables.some((item) => item.evidenceCount === 0)) {
-    gaps.push("A laboratory file on every test in the standard tables");
-  }
   return gaps;
 }

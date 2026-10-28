@@ -42,6 +42,26 @@ export function InstitutionAccounts({
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  async function assignExisting() {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    const res = await fetch("/api/org/assign-existing", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, role, organizationId }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!res.ok) {
+      setError(data.error || "Could not assign that account");
+      return;
+    }
+    setEmail("");
+    setMessage(data.message || "Role assigned");
+    router.refresh();
+  }
+
   async function invite(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -171,6 +191,14 @@ export function InstitutionAccounts({
             className="h-10 rounded-md bg-[var(--accent)] px-3 text-sm font-medium text-[var(--accent-fg)]"
           >
             Invite
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={assignExisting}
+            className="h-10 rounded-md border border-[var(--line)] px-3 text-sm"
+          >
+            Assign existing account
           </button>
         </form>
       )}

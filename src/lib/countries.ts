@@ -48,6 +48,22 @@ export function countryName(iso2: string | null | undefined) {
   return WORLD_COUNTRIES.find((country) => country.iso2 === iso2)?.name || iso2;
 }
 
+/** Distinct member-state labels for the organisations on this login. */
+export function membershipCountryLabel(
+  memberships: Array<{ organization: { memberState?: { iso2: string; name: string } | null } }>,
+) {
+  const seen = new Map<string, string>();
+  for (const membership of memberships) {
+    const state = membership.organization.memberState;
+    if (!state?.iso2) continue;
+    seen.set(state.iso2, state.name);
+  }
+  return [...seen.entries()]
+    .sort((a, b) => a[1].localeCompare(b[1]))
+    .map(([iso2, name]) => `${name} (${iso2})`)
+    .join(" · ");
+}
+
 export function countryOptions() {
   return WORLD_COUNTRIES.map((country) => ({
     value: country.iso2,

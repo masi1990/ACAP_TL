@@ -10,6 +10,8 @@ import {
   authorityOwnerStateIds,
   can,
   canAssignAcrossOrganisations,
+  isTradeOrgType,
+  managesSameAuthorityType,
   roleLabel,
 } from "@/lib/rbac";
 import { isLocale, type Locale } from "@/lib/i18n";
@@ -18,7 +20,11 @@ import { dayInput, grantFromLicences } from "@/lib/cb-profile";
 import { DeleteButton } from "@/components/admin/crud-form";
 import { ClientRedirect } from "@/components/admin/client-redirect";
 import { Badge } from "@/components/ui/badge";
+import { LinePager } from "@/components/line-pager";
+import { listHref, listPage } from "@/lib/list-page";
+import { GrantRightsForm, type GrantAccount } from "./grant-rights-form";
 import { InstitutionForm } from "./institution-form";
+import { InstitutionRequests } from "./institution-requests";
 import { InstitutionAccounts, type AccountRole } from "./institution-accounts";
 import { CountryRecForm } from "./country-recs";
 
@@ -31,7 +37,7 @@ export default async function InstitutionsPage({
   searchParams,
 }: {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ region?: string; country?: string; rec?: string; type?: string }>;
+  searchParams: Promise<{ region?: string; country?: string; rec?: string; type?: string; page?: string }>;
 }) {
   const { locale: raw } = await params;
   const query = await searchParams;
@@ -58,7 +64,7 @@ export default async function InstitutionsPage({
   const canDelete = can(session.user, "institutions:delete");
   const hubAssign = canAssignAcrossOrganisations(session.user);
 
-  const [states, recs, organizations, roleCatalogue] = await Promise.all([
+  const [states, recs, organizations, roleCatalogue, accountRows] = await Promise.all([
     prisma.memberState.findMany({
       include: { recMemberships: { include: { rec: true } } },
       orderBy: { name: "asc" },
@@ -100,7 +106,30 @@ export default async function InstitutionsPage({
       select: { code: true, name: true, scope: true },
       orderBy: { name: "asc" },
     }),
+    hubRead && canWrite
+      ? prisma.userAccount.findMany({
+          select: {
+            email: true,
+            name: true,
+            memberships: {
+              select: {
+                role: true,
+                organization: { select: { name: true, type: true, memberStateId: true } },
+              },
+            },
+          },
+          orderBy: { email: "asc" },
+        })
+      : Promise.resolve([]),
   ]);
+
+  const requests = canWrite
+    ? await prisma.institutionRequest.findMany({
+        where: { status: "PENDING" },
+        include: { user: { select: { email: true } }, memberState: { select: { name: true, iso2: true } } },
+        orderBy: { createdAt: "asc" },
+      })
+    : [];
 
   const catalogueRoles: AccountRole[] = roleCatalogue.map((role) => ({
     code: role.code,
@@ -132,6 +161,12 @@ export default async function InstitutionsPage({
     if (recId && !state.recMemberships.some((membership) => membership.recId === recId)) return false;
     return true;
   });
+  const filtered = Boolean(region || countryId || recId);
+  const listedStates = visibleStates.filter(
+    (state) => filtered || organizations.some((org) => org.memberStateId === state.id),
+  );
+  const listing = listPage(query.page, listedStates.length, 8);
+  const pageStates = listedStates.slice(listing.skip, listing.skip + listing.take);
 
   return (
     <div className="space-y-8">
@@ -140,8 +175,10 @@ export default async function InstitutionsPage({
         <p className="mt-1 max-w-3xl text-sm text-[var(--muted)]">
           Each country keeps its own certification body, standards body, regulator, customs authority,
           and other offices. They do not share one account. A country belongs to one region and can
-          belong to more than one REC. Only ARSO can create or delete an authority. The main account
-          of an authority adds members for that country only.
+          belong to more than one REC.           Only ARSO can create or delete an authority. To create one for a person
+          who already has an account, choose that account. The main account of an
+          authority adds members for that same authority type. Other types in the
+          country are listed for viewing only.
         </p>
       </div>
 
@@ -199,6 +236,44 @@ export default async function InstitutionsPage({
       </form>
 
       {canWrite && (
+        <InstitutionRequests
+          rows={requests.map((row) => ({
+            id: row.id,
+            name: row.name,
+            typeLabel: AUTHORITY_LABELS[row.type as keyof typeof AUTHORITY_LABELS] || row.type,
+            country: `${row.memberState.name} (${row.memberState.iso2})`,
+            email: row.user.email,
+          }))}
+        />
+      )}
+
+      {hubRead && canWrite && (
+        <section className="space-y-3">
+          <h2 className="text-xl font-semibold">Grant institutional rights</h2>
+          <p className="max-w-3xl text-sm text-[var(--muted)]">
+            Use this when someone already has an account and needs an institution on that same login. Choose their
+            account. Their manufacturer company stays, and they become the organisation admin of the new institution.
+            The institution name and country start from the organisation on that account.
+          </p>
+          <GrantRightsForm
+            accounts={accountRows.map((user): GrantAccount => {
+              const trade = user.memberships.filter((membership) => isTradeOrgType(membership.organization.type));
+              const chosen =
+                trade.find((membership) => membership.role === "PRIMARY_ADMIN") || trade[0] || user.memberships[0];
+              const organizationName = chosen?.organization.name || "";
+              return {
+                email: user.email,
+                label: `${user.email} · ${user.name}${organizationName ? ` · ${organizationName}` : " · No organisation"}`,
+                institutionName: organizationName,
+                memberStateId: chosen?.organization.memberStateId || "",
+              };
+            })}
+            countries={states.map((state) => ({ value: state.id, label: `${state.name} (${state.iso2})` }))}
+          />
+        </section>
+      )}
+
+      {canWrite && (
         <InstitutionForm
           states={states}
           action="/api/admin/organizations"
@@ -208,7 +283,7 @@ export default async function InstitutionsPage({
       )}
 
       <div className="space-y-8">
-        {visibleStates.map((state) => {
+        {pageStates.map((state) => {
           const rows = organizations.filter((org) => org.memberStateId === state.id);
           if (type && rows.length === 0) return null;
           return (
@@ -332,10 +407,7 @@ export default async function InstitutionsPage({
                                   <div className="mt-3">
                                     <InstitutionAccounts
                                       organizationId={org.id}
-                                      canAssign={
-                                        hubAssign ||
-                                        (!!org.memberStateId && ownerStates.includes(org.memberStateId))
-                                      }
+                                      canAssign={hubAssign || managesSameAuthorityType(session.user, org)}
                                       roles={rolesFor(org.type)}
                                       members={org.memberships.map((member) => ({
                                         userId: member.user.id,
@@ -360,6 +432,22 @@ export default async function InstitutionsPage({
           );
         })}
       </div>
+      <LinePager
+        page={listing.page}
+        pageCount={listing.pageCount}
+        prevHref={listHref(`/${locale}/admin/institutions`, listing.page - 1, {
+          region,
+          country: countryId,
+          rec: recId,
+          type,
+        })}
+        nextHref={listHref(`/${locale}/admin/institutions`, listing.page + 1, {
+          region,
+          country: countryId,
+          rec: recId,
+          type,
+        })}
+      />
     </div>
   );
 }

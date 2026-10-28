@@ -17,17 +17,14 @@ export default async function CbStandardPage({
   const locale = raw as Locale;
   const session = await getSessionUser();
   if (!session) return <ClientRedirect href={`/${locale}/login?next=/${locale}/cb/standards/${id}`} />;
-  const allowed =
-    can(session.user, "certify:operate") ||
-    can(session.user, "products:read") ||
-    can(session.user, "standards:read");
+  const allowed = can(session.user, "certify:operate");
   if (!allowed) notFound();
 
   const data = await getAdminFullStandardPreview(id);
   if (!data) notFound();
 
   return (
-    <main className="mx-auto max-w-6xl space-y-4 px-4 py-8">
+    <main className="shell space-y-4 py-8">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <Link className="text-sm text-[var(--accent)] underline" href={`/${locale}/cb#products`}>

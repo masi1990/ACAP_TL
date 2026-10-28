@@ -1,4 +1,4 @@
-import { authorityOwnerStateIds, can, permissionsForUser } from "./rbac";
+import { authorityOwnerStateIds, can, isTradeOrgType, permissionsForUser } from "./rbac";
 import { t, type Locale } from "./i18n";
 
 type NavUser = Parameters<typeof can>[0];
@@ -12,6 +12,8 @@ export type NavLink = {
 
 /** Public path, in the order a buyer or consumer moves through the system. */
 export const PUBLIC_FLOW = [
+  { id: "catalogue", path: "/catalogue", label: "navCatalogue" },
+  { id: "library", path: "/library", label: "navLibrary" },
   { id: "store", path: "/store", label: "navStore" },
   { id: "lookup", path: "/lookup", label: "navLookup" },
   { id: "registry", path: "/registry", label: "navRegistry" },
@@ -22,6 +24,8 @@ export const PUBLIC_FLOW = [
 export type PublicFlowId = (typeof PUBLIC_FLOW)[number]["id"];
 
 const PUBLIC_BLURBS: Record<PublicFlowId, string> = {
+  catalogue: "Number, name, scope, sector, technical committee, and tariff lines",
+  library: "Original standards for harmonisation and adoption",
   store: "Published standards, with Clause 1 on the public preview",
   lookup: "Which standard applies to an HS line",
   registry: "The public register after a certificate is issued",
@@ -38,32 +42,26 @@ export function publicNav(locale: Locale): NavLink[] {
       label: t(locale, step.label),
       blurb: PUBLIC_BLURBS[step.id],
     })),
+    { id: "analytics", href: `/${locale}/analytics`, label: t(locale, "navAnalytics") },
   ];
 }
 
-/** Same gate as the admin shell. */
+/** Hub catalogue and role administration. Trade and certification-body memberships do not qualify. */
 export function canOpenAdmin(user: NavUser) {
   const perms = permissionsForUser(user);
   return (
-    authorityOwnerStateIds(user).length > 0 ||
     perms.has("standards:write") ||
     perms.has("recs:write") ||
     perms.has("tariffs:write") ||
-    perms.has("cb:write") ||
-    perms.has("manufacturer:write") ||
     perms.has("institutions:read") ||
-    perms.has("standards:read") ||
-    perms.has("roles:read")
+    perms.has("roles:read") ||
+    perms.has("audit:read")
   );
 }
 
+/** Certification desk. Recording products is not enough to open it. */
 export function canOpenCertification(user: NavUser) {
-  return (
-    can(user, "clients:write") ||
-    can(user, "products:write") ||
-    can(user, "certify:operate") ||
-    can(user, "products:read")
-  );
+  return can(user, "certify:operate");
 }
 
 /** Adapters and metrics stay off the public bar. */
@@ -80,6 +78,14 @@ export function workNav(user: NavUser, locale: Locale): NavLink[] {
       blurb: "Your roles and the desks they open",
     },
   ];
+  if (user.memberships?.some((membership) => isTradeOrgType(membership.organization.type))) {
+    links.push({
+      id: "trade",
+      href: `/${locale}/trade`,
+      label: "My products",
+      blurb: "Every product, the body certifying it, and the certificate, customs, and inspection",
+    });
+  }
   if (canOpenCertification(user)) {
     links.push({
       id: "certification",
@@ -112,6 +118,14 @@ export function workNav(user: NavUser, locale: Locale): NavLink[] {
       blurb: "Follow-up after the product is on the market",
     });
   }
+  if (can(user, "institutions:read") || authorityOwnerStateIds(user).length > 0) {
+    links.push({
+      id: "institutions",
+      href: `/${locale}/admin/institutions`,
+      label: t(locale, "navInstitutions"),
+      blurb: "Authorities by country, and the account for each office",
+    });
+  }
   if (canOpenAdmin(user)) {
     links.push({
       id: "admin",
@@ -121,4 +135,56 @@ export function workNav(user: NavUser, locale: Locale): NavLink[] {
     });
   }
   return links;
+}
+
+export type NavGroup = { id: string; label: string; links: NavLink[] };
+
+/** One menu for the header, the home page, and the dashboard. */
+export function siteNav(user: NavUser | null, locale: Locale): NavGroup[] {
+  const link = (id: string, path: string, label: string, blurb?: string): NavLink => ({
+    id,
+    href: `/${locale}${path}`,
+    label,
+    blurb,
+  });
+  const groups: NavGroup[] = [
+    {
+      id: "standards",
+      label: t(locale, "navGroupStandards"),
+      links: [
+        link("catalogue", "/catalogue", t(locale, "navCatalogue"), PUBLIC_BLURBS.catalogue),
+        link("library", "/library", t(locale, "navLibrary"), PUBLIC_BLURBS.library),
+        link("store", "/store", t(locale, "navStore"), PUBLIC_BLURBS.store),
+        link("lookup", "/lookup", t(locale, "navLookup"), PUBLIC_BLURBS.lookup),
+      ],
+    },
+    {
+      id: "products",
+      label: t(locale, "navGroupProducts"),
+      links: [
+        link("registry", "/registry", t(locale, "navRegistry"), PUBLIC_BLURBS.registry),
+        link("verify", "/verify", t(locale, "navVerify"), PUBLIC_BLURBS.verify),
+        link("consumers", "/consumers", t(locale, "navConsumers"), PUBLIC_BLURBS.consumers),
+      ],
+    },
+  ];
+  if (user) {
+    const desks = workNav(user, locale).filter((item) => item.id !== "admin");
+    if (desks.length) groups.push({ id: "desks", label: t(locale, "navGroupDesks"), links: desks });
+  }
+  groups.push({
+    id: "analytics",
+    label: t(locale, "navAnalytics"),
+    links: [
+      link("analytics", "/analytics", t(locale, "navAnalytics"), "Certified products, marks, and the certification pipeline"),
+    ],
+  });
+  if (user && canOpenAdmin(user)) {
+    groups.push({
+      id: "admin",
+      label: t(locale, "navAdmin"),
+      links: [link("admin", "/admin", t(locale, "navAdmin"), "Catalogue, institutions, and roles")],
+    });
+  }
+  return groups;
 }

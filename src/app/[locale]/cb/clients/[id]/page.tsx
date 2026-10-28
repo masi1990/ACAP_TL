@@ -2,7 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
-import { can } from "@/lib/rbac";
+import { visibleClientProducts } from "@/lib/cb-scope";
+import { groupImportedMarks } from "@/lib/imported-marks";
+import { can, certificationBodyIds, hasGlobalPermission } from "@/lib/rbac";
 import { isLocale, type Locale } from "@/lib/i18n";
 import { countryName, countryOptions } from "@/lib/countries";
 import { originSummary } from "@/lib/origin-claim";
@@ -23,7 +25,7 @@ export default async function ClientProductsPage({
   if (!session) return <ClientRedirect href={`/${locale}/login?next=/${locale}/cb/clients/${id}`} />;
 
   const user = session.user;
-  if (!can(user, "products:write") && !can(user, "certify:operate") && !can(user, "clients:write")) notFound();
+  if (!can(user, "certify:operate") && !can(user, "clients:write")) notFound();
 
   const client = await prisma.organization.findUnique({
     where: { id },
@@ -48,12 +50,20 @@ export default async function ClientProductsPage({
   });
   if (!client || (client.type !== "MANUFACTURER" && client.type !== "IMPORTER")) notFound();
 
-  const isAdmin = can(user, "cb:write");
-  const own = user.memberships.find((m) => m.organization.type === "CB")?.organization.id;
-  if (!isAdmin && client.servicingCbId !== own) notFound();
+  const hub = hasGlobalPermission(user, "cb:write");
+  const cbIds = certificationBodyIds(user);
+  const serves = hub || Boolean(client.servicingCbId && cbIds.includes(client.servicingCbId));
+  const products = visibleClientProducts(
+    client.clientAccounts.flatMap((account) => account.companies.flatMap((company) => company.products)),
+    cbIds,
+    client.servicingCbId,
+    hub,
+  );
+  if (!serves && products.length === 0) notFound();
 
-  const [versions, tariffs, bodies] = await Promise.all([
+  const [versions, tariffs, bodies, importedMarks] = await Promise.all([
     prisma.standardVersion.findMany({
+      where: { standard: { kind: "PRODUCT" } },
       include: { standard: true },
       orderBy: { standard: { designation: "asc" } },
     }),
@@ -62,14 +72,23 @@ export default async function ClientProductsPage({
       orderBy: { codeDisplay: "asc" },
       take: 500,
     }),
-    prisma.organization.findMany({ where: { type: "CB" }, orderBy: { name: "asc" } }),
+    prisma.organization.findMany({
+      where: { type: "CB", ...(hub ? {} : { id: { in: cbIds } }) },
+      orderBy: { name: "asc" },
+    }),
+    prisma.importedCertifiedMark.findMany({
+      where: { manufacturerOrgId: client.id },
+      include: { standardVersion: { include: { standard: true } } },
+      orderBy: [{ productName: "asc" }, { markType: "asc" }],
+    }),
   ]);
-  const products = client.clientAccounts.flatMap((account) => account.companies.flatMap((company) => company.products));
-  const country = client.clientAccounts.flatMap((account) => account.companies)[0]?.countryIso2 || "";
+  const importedGroups = groupImportedMarks(importedMarks);
   const countries = countryOptions();
+  const pickBody = hub || cbIds.length > 1;
+  const country = client.clientAccounts.flatMap((account) => account.companies)[0]?.countryIso2 || "";
 
   return (
-    <main className="mx-auto max-w-5xl space-y-8 px-4 py-10">
+    <main className="shell space-y-8 py-10">
       <div>
         <Link className="text-sm text-[var(--accent)] underline" href={`/${locale}/cb`}>
           Certification desk
@@ -82,7 +101,7 @@ export default async function ClientProductsPage({
         </p>
       </div>
 
-      {can(user, "clients:write") && (
+      {serves && can(user, "clients:write") && (
         <div className="space-y-3">
           <div className="flex justify-end">
             <DeleteButton action={`/api/cb/client/${client.id}`} label="Delete manufacturer or importer" />
@@ -113,7 +132,7 @@ export default async function ClientProductsPage({
                 options: countries,
                 defaultValue: country,
               },
-              ...(isAdmin
+              ...(pickBody
                 ? [
                     {
                       name: "cbOrganizationId",
@@ -130,11 +149,11 @@ export default async function ClientProductsPage({
         </div>
       )}
 
-      {can(user, "products:write") && versions.length > 0 && (
+      {serves && can(user, "products:write") && client.status === "ACTIVE" && versions.length > 0 && (
         <CrudForm
           idPrefix="product-"
           action="/api/cb/products"
-          submitLabel="Add certified product"
+          submitLabel="Add product"
           fields={productFormFields({
             organizationId: client.id,
             versions: versions.map((version) => ({
@@ -161,7 +180,7 @@ export default async function ClientProductsPage({
             </tr>
           </thead>
           <tbody>
-            {products.length === 0 && (
+            {products.length === 0 && importedGroups.length === 0 && (
               <tr>
                 <td className="px-4 py-6 text-[var(--muted)]" colSpan={4}>
                   No products certified for this client yet.
@@ -169,8 +188,12 @@ export default async function ClientProductsPage({
               </tr>
             )}
             {products.map((product) => {
-              const link = product.standardLinks[0];
-              const coc = product.applications[0]?.coc;
+              const links = [...product.standardLinks].sort(
+                (a, b) => Number(a.markScheme === "ECO") - Number(b.markScheme === "ECO"),
+              );
+              const certificates = [...product.applications]
+                .sort((a, b) => Number(a.markScheme === "ECO") - Number(b.markScheme === "ECO"))
+                .flatMap((row) => (row.coc ? [{ mark: row.markScheme, no: row.coc.certificateNo }] : []));
               return (
                 <tr key={product.id} className="border-b border-[var(--line)]">
                   <td className="px-4 py-3">
@@ -180,16 +203,53 @@ export default async function ClientProductsPage({
                     <div className="text-xs text-[var(--accent)]">Open certification</div>
                     <div className="text-xs text-[var(--muted)]">{product.commodity}</div>
                   </td>
-                  <td className="px-4 py-3">{link?.standardVersion.standard.designation ?? "—"}</td>
+                  <td className="px-4 py-3">
+                    {links.length === 0 && "—"}
+                    {links.map((link) => (
+                      <div key={link.id}>
+                        {link.markScheme === "ECO" ? "Eco" : "Quality"} · {link.standardVersion.standard.designation}
+                      </div>
+                    ))}
+                  </td>
                   <td className="px-4 py-3">{originSummary(product.originClaimJson)}</td>
                   <td className="px-4 py-3">
-                    {coc ? (
-                      <CertificateDownloadLink href={`/${locale}/certificates/${coc.certificateNo}`}>
-                        {coc.certificateNo}
-                      </CertificateDownloadLink>
-                    ) : (
-                      "—"
-                    )}
+                    {certificates.length === 0 && "—"}
+                    {certificates.map((coc) => (
+                      <div key={coc.no}>
+                        <CertificateDownloadLink href={`/${locale}/certificates/${coc.no}`}>
+                          {coc.mark === "ECO" ? "Eco" : "Quality"} · {coc.no}
+                        </CertificateDownloadLink>
+                      </div>
+                    ))}
+                  </td>
+                </tr>
+              );
+            })}
+            {importedGroups.map((marks) => {
+              const primary = marks[0];
+              return (
+                <tr key={primary.liveProductId} className="border-b border-[var(--line)]">
+                  <td className="px-4 py-3">
+                    <div className="font-medium">{primary.productName}</div>
+                    <div className="text-xs text-[var(--muted)]">{primary.brand || "Copied certified product"}</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    {marks.map((mark) => (
+                      <div key={mark.id}>
+                        {mark.markType === "eco" ? "Eco" : "Quality"} ·{" "}
+                        {mark.standardVersion?.standard.designation || mark.sourceStandardText || "Standard not linked"}
+                      </div>
+                    ))}
+                  </td>
+                  <td className="px-4 py-3">{primary.country || "—"}</td>
+                  <td className="px-4 py-3">
+                    {marks.map((mark) => (
+                      <div key={mark.id}>
+                        <Link className="text-[var(--accent)] underline" href={`/${locale}/verify?pin=${encodeURIComponent(mark.pinText)}`}>
+                          {mark.markType === "eco" ? "Eco" : "Quality"} · {mark.certificationId}
+                        </Link>
+                      </div>
+                    ))}
                   </td>
                 </tr>
               );

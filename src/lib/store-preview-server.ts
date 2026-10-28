@@ -2,12 +2,15 @@ import { prisma } from "@/lib/db";
 import { buildStandardPreviewPayload } from "@/lib/standard-preview";
 import { assessMachinePackCompleteness } from "@/lib/fidelity";
 import { extractClause1ScopeOnly } from "@/lib/scope-text";
+import { openReading } from "@/lib/catalog-access";
 import {
+  ensureStandardFullRasters,
   ensureStandardPreviewRasters,
   pagesFromManifest,
   tocFromMachineClauses,
 } from "@/lib/preview-raster";
 import { ars464TableOfContents } from "@/lib/standard-preview";
+import { authoritativeLocaleOrNull } from "@/lib/publication";
 
 type MachineDoc = {
   standard?: { technicalCommittee?: string; designation?: string };
@@ -26,14 +29,28 @@ function isArs464(designation: string, editionLabel: string) {
   return /\bARS\s*464\b/i.test(`${designation} ${editionLabel}`);
 }
 
-export async function getCatalogPreviewPayload(catalogItemId: string) {
+export async function getCatalogPreviewPayload(catalogItemId: string, editionLocale?: string | null) {
   const item = await prisma.catalogItem.findUnique({
     where: { id: catalogItemId },
-    include: { standardVersion: { include: { standard: true } } },
+    include: {
+      standardVersion: {
+        include: {
+          languageFiles: true,
+          standard: { include: { technicalCommittee: { include: { sector: true } }, adoptions: true } },
+        },
+      },
+    },
   });
   if (!item) return null;
 
   const sv = item.standardVersion;
+  const requested = authoritativeLocaleOrNull(editionLocale);
+  const languageFile = requested
+    ? sv.languageFiles.find((file) => file.locale === requested)
+    : sv.languageFiles.find((file) => file.locale === sv.authoritativeLocale);
+  if (requested && !languageFile && !(requested === sv.authoritativeLocale && sv.sourcePdfUri)) return null;
+  const previewLocale = languageFile?.locale || sv.authoritativeLocale;
+  const sourcePdfUri = languageFile?.sourcePdfUri || sv.sourcePdfUri;
   const designation = sv.standard.designation;
   let machine: MachineDoc = {};
   try {
@@ -67,19 +84,29 @@ export async function getCatalogPreviewPayload(catalogItemId: string) {
     machine.fullText,
   );
 
+  const readable = openReading(item.distribution);
   // Per-standard document pages — never reuse another standard's rasters
   let pdfPages = undefined as ReturnType<typeof pagesFromManifest> | undefined;
-  if (isArs464(designation, sv.editionLabel) && !sv.sourcePdfUri?.includes("/uploads/")) {
+  if (isArs464(designation, sv.editionLabel) && !sourcePdfUri?.includes("/uploads/") && !readable) {
     // prepared ARS 464 assets only when this IS ARS 464
     pdfPages = undefined; // buildStandardPreviewPayload will use ARS464 pack
-  } else if (sv.sourcePdfUri) {
+  } else if (sourcePdfUri) {
     try {
-      const rasters = await ensureStandardPreviewRasters({
-        standardVersionId: sv.id,
-        sourcePdfUri: sv.sourcePdfUri,
-      });
+      const rasters = readable
+        ? await ensureStandardFullRasters({
+            standardVersionId: sv.id,
+            sourcePdfUri,
+            rasterKey: `${sv.id}-${previewLocale}`,
+          })
+        : await ensureStandardPreviewRasters({
+            standardVersionId: sv.id,
+            sourcePdfUri,
+            rasterKey: `${sv.id}-${previewLocale}`,
+          });
       if (rasters) {
-        pdfPages = pagesFromManifest(rasters.baseUrl, rasters.manifest);
+        pdfPages = pagesFromManifest(rasters.baseUrl, rasters.manifest).map((page) =>
+          readable ? { ...page, access: "free" as const, note: undefined } : page,
+        );
       }
     } catch (e) {
       console.error("preview raster failed", sv.id, e);
@@ -94,17 +121,21 @@ export async function getCatalogPreviewPayload(catalogItemId: string) {
     publisher: sv.standard.publisher,
     year: sv.year,
     technicalCommittee,
-    sourcePdfUri: sv.sourcePdfUri,
+    sourcePdfUri,
     designation,
     tableOfContents: toc,
     pdfPages,
   });
 
   return {
+    ...preview,
     catalogItemId: item.id,
     standardVersionId: sv.id,
+    editionLocale: previewLocale,
     completeness,
-    ...preview,
+    distribution: item.distribution,
+    openReading: readable,
+    allowDownload: item.distribution === "FREE_DOWNLOAD",
   };
 }
 
@@ -155,10 +186,13 @@ export async function getStandardPreviewByVersionId(standardVersionId: string) {
     pdfPages,
   });
   return {
+    ...preview,
     catalogItemId: null as string | null,
     standardVersionId: sv.id,
     completeness: null,
-    ...preview,
+    distribution: "PAID",
+    openReading: false,
+    allowDownload: false,
   };
 }
 

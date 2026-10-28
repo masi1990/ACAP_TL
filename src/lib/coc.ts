@@ -44,6 +44,10 @@ export async function issueCertificateOfConformity(input: {
       return { coc: app.coc, reused: true as const };
     }
 
+    if (!["EVALUATION", "REVIEW", "DECISION", "CERTIFIED"].includes(app.status)) {
+      throw new Error("The certification body has not accepted this product yet");
+    }
+
     const [items, dossier] = await Promise.all([
       tx.assessmentItem.findMany({
         where: { applicationId: app.id },
@@ -99,7 +103,8 @@ export async function issueCertificateOfConformity(input: {
       data: { status: "CERTIFIED" },
     });
 
-    // Ensure each variant has a PIN
+    // One PIN per product. The first certificate creates it. A later certificate
+    // for the other mark leaves that PIN pointing at the first certificate.
     for (const variant of app.product.variants) {
       if (!variant.pin) {
         const pinCode = `PIN-${randomBytes(4).toString("hex").toUpperCase()}`;
@@ -114,10 +119,15 @@ export async function issueCertificateOfConformity(input: {
             expiresAt,
           },
         });
-      } else {
+      } else if (variant.pin.status !== "certified") {
         await tx.productPin.update({
           where: { id: variant.pin.id },
-          data: { status: "certified", cocId: coc.id, issuedAt, expiresAt },
+          data: {
+            status: "certified",
+            issuedAt: variant.pin.issuedAt ?? issuedAt,
+            expiresAt: variant.pin.expiresAt ?? expiresAt,
+            ...(variant.pin.cocId ? {} : { cocId: coc.id }),
+          },
         });
       }
     }

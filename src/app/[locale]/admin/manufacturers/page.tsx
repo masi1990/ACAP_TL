@@ -1,5 +1,6 @@
 import { Fragment } from "react";
 import { notFound } from "next/navigation";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { can } from "@/lib/rbac";
@@ -8,11 +9,15 @@ import { countryOptions } from "@/lib/countries";
 import { CrudForm, DeleteButton } from "@/components/admin/crud-form";
 import { ClientRedirect } from "@/components/admin/client-redirect";
 import { Badge } from "@/components/ui/badge";
+import { LinePager } from "@/components/line-pager";
+import { listHref, listPage } from "@/lib/list-page";
 
 export default async function AdminManufacturersPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ locale: string }>;
+  searchParams: Promise<{ page?: string }>;
 }) {
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
@@ -21,17 +26,22 @@ export default async function AdminManufacturersPage({
   if (!session) return <ClientRedirect href={`/${locale}/login?next=/${locale}/admin/manufacturers`} />;
   if (!can(session.user, "manufacturer:read")) notFound();
 
+  const where: Prisma.OrganizationWhereInput = {
+    type: { in: ["MANUFACTURER", "IMPORTER", "CLIENT"] },
+  };
+  const total = await prisma.organization.count({ where });
+  const listing = listPage((await searchParams).page, total);
   const [rows, states, bodies] = await Promise.all([
     prisma.organization.findMany({
-      where: {
-        type: { in: ["MANUFACTURER", "IMPORTER", "CLIENT"] },
-      },
+      where,
       include: {
         memberState: true,
-        clientAccounts: { include: { companies: true } },
+        clientAccounts: { include: { companies: { include: { operatingCountries: true } } } },
         memberships: { include: { user: { select: { email: true } } } },
       },
       orderBy: { name: "asc" },
+      skip: listing.skip,
+      take: listing.take,
     }),
     prisma.memberState.findMany({ orderBy: { name: "asc" } }),
     prisma.organization.findMany({ where: { type: "CB" }, orderBy: { name: "asc" } }),
@@ -70,10 +80,17 @@ export default async function AdminManufacturersPage({
             { name: "legalName", label: "Legal company name", placeholder: "Same as organisation if blank" },
             {
               name: "memberStateId",
-              label: "Member state",
+              label: "Country of registration",
               type: "select",
               required: true,
               options: states.map((s) => ({ value: s.id, label: `${s.name} (${s.iso2})` })),
+            },
+            {
+              name: "operatingCountryIds",
+              label: "Countries of operation",
+              type: "multiselect",
+              options: states.map((s) => ({ value: s.id, label: `${s.name} (${s.iso2})` })),
+              help: "A company can operate in more than one country. The country of registration stays the field above.",
             },
             {
               name: "servicingCbId",
@@ -183,6 +200,14 @@ export default async function AdminManufacturersPage({
                                   defaultValue: r.memberStateId || "",
                                 },
                                 {
+                                  name: "operatingCountryIds",
+                                  label: "Countries of operation",
+                                  type: "multiselect",
+                                  options: states.map((state) => ({ value: state.id, label: `${state.name} (${state.iso2})` })),
+                                  defaultValue: company?.operatingCountries.map((country) => country.memberStateId) || [],
+                                  help: "A company can operate in more than one country. Registration country stays above.",
+                                },
+                                {
                                   name: "servicingCbId",
                                   label: "Certification body",
                                   type: "select",
@@ -202,6 +227,12 @@ export default async function AdminManufacturersPage({
           </tbody>
         </table>
       </div>
+      <LinePager
+        page={listing.page}
+        pageCount={listing.pageCount}
+        prevHref={listHref(`/${locale}/admin/manufacturers`, listing.page - 1)}
+        nextHref={listHref(`/${locale}/admin/manufacturers`, listing.page + 1)}
+      />
       <p className="text-xs text-[var(--muted)]">/{locale}/admin/manufacturers</p>
     </div>
   );

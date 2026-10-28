@@ -10,6 +10,10 @@ import { extractClause1ScopeOnly } from "@/lib/scope-text";
 type CatalogPreviewPayload = BuiltStandardPreview & {
   catalogItemId: string | null;
   standardVersionId?: string;
+  editionLocale?: string;
+  distribution?: string;
+  openReading?: boolean;
+  allowDownload?: boolean;
   completeness?: { ok: boolean; checks: Array<{ id: string; label: string; present: boolean }> } | null;
 };
 
@@ -20,7 +24,11 @@ export function PreviewViewer({
   data: CatalogPreviewPayload;
   closeHref: string;
 }) {
-  const pdfPages = data.pdfPages ?? [];
+  const openReading = Boolean(data.openReading);
+  const allowDownload = Boolean(data.allowDownload);
+  const pdfPages = (data.pdfPages ?? []).map((page) =>
+    openReading ? { ...page, access: "free" as const } : page,
+  );
   const usePdf = pdfPages.length > 0;
   const [pageIndex, setPageIndex] = useState(0);
 
@@ -43,7 +51,13 @@ export function PreviewViewer({
         <h3 className="text-[11px] font-semibold uppercase tracking-[0.16em] text-neutral-600">
           Document pages
         </h3>
-        <p className="mt-1 text-[10px] text-neutral-500">This standard only — Clause 1 Scope is free</p>
+        <p className="mt-1 text-sm text-[var(--ink)]">
+          {openReading && !allowDownload
+            ? "Free to read on this page. This standard cannot be downloaded."
+            : allowDownload
+              ? "Free to read. You can also download the published file."
+              : "This standard only — Clause 1 Scope is free"}
+        </p>
         <ul className="mt-2 max-h-56 space-y-1 overflow-y-auto text-[12px]">
           {usePdf
             ? pdfPages.map((p, i) => (
@@ -56,7 +70,7 @@ export function PreviewViewer({
                       i === pageIndex && "bg-black/10 font-medium",
                     )}
                   >
-                    <span className="w-5 tabular-nums text-neutral-500">{i + 1}</span>
+                    <span className="w-5 tabular-nums text-[#1a1a1a]">{i + 1}</span>
                     <span className="flex-1 truncate">{p.label}</span>
                     <span
                       className={cn(
@@ -80,7 +94,7 @@ export function PreviewViewer({
                       i === pageIndex && "bg-black/10 font-medium",
                     )}
                   >
-                    <span className="w-5 tabular-nums text-neutral-500">{i + 1}</span>
+                    <span className="w-5 tabular-nums text-[#1a1a1a]">{i + 1}</span>
                     <span className="flex-1 truncate">{p.label}</span>
                     <span className="text-[9px] uppercase tracking-wide text-emerald-700">open</span>
                   </button>
@@ -91,21 +105,21 @@ export function PreviewViewer({
         <h3 className="mt-5 text-[11px] font-semibold uppercase tracking-[0.16em] text-neutral-600">
           Table of contents
         </h3>
-        <p className="mt-1 text-[10px] text-neutral-500">As published in {data.editionLabel}</p>
+        <p className="mt-1 text-[10px] text-[#1a1a1a]">As published in {data.editionLabel}</p>
         <ul className="mt-3 space-y-0.5 text-[13px]">
           {data.tableOfContents.map((entry, idx) => {
             const isScope = entry.number === "1" || entry.includedInPreview;
-            const isClause2 = entry.number === "2" || /^2(\.0)?$/.test(entry.number);
+            const isClause2 = !openReading && (entry.number === "2" || /^2(\.0)?$/.test(entry.number));
             return (
               <li
                 key={`store-toc-${idx}`}
                 className={cn(
-                  "flex gap-2 border-b border-dotted border-neutral-300/80 px-1 py-1.5",
+                  "flex gap-2 border-b border-dotted border-neutral-300/80 px-1 py-1.5 text-[var(--ink)]",
                   isScope
-                    ? "bg-emerald-500/10 font-medium text-neutral-900"
+                    ? "bg-emerald-500/10 font-medium"
                     : isClause2
                       ? "select-none text-transparent blur-sm"
-                      : "text-neutral-400",
+                      : "",
                 )}
                 aria-hidden={isClause2 || undefined}
                 title={isClause2 ? "Clause 2 is not part of the free preview" : undefined}
@@ -128,6 +142,8 @@ export function PreviewViewer({
                 <img
                   src={page.imageUrl}
                   alt={`${data.editionLabel} — ${page.label}`}
+                  draggable={allowDownload}
+                  onContextMenu={openReading && !allowDownload ? (event) => event.preventDefault() : undefined}
                   className={cn(
                     "mx-auto block h-auto w-full max-w-[640px] bg-white",
                     page.access === "locked" && "pointer-events-none",
@@ -150,11 +166,11 @@ export function PreviewViewer({
               <div className="min-h-[480px] bg-[#f7f4ee] px-8 py-10 text-[#1a1a1a]">
                 {htmlPage.kind === "cover" && (
                   <div className="space-y-4 text-center">
-                    <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">{htmlPage.content.org}</p>
+                    <p className="text-xs uppercase tracking-[0.2em] text-[#1a1a1a]">{htmlPage.content.org}</p>
                     <p className="text-sm font-semibold">{htmlPage.content.documentType}</p>
                     <h2 className="font-[family-name:var(--font-display)] text-3xl">{htmlPage.content.designation}</h2>
                     <p className="text-lg">{htmlPage.content.title}</p>
-                    <p className="text-xs text-neutral-500">ICS {htmlPage.content.ics}</p>
+                    <p className="text-xs text-[#1a1a1a]">ICS {htmlPage.content.ics}</p>
                   </div>
                 )}
                 {htmlPage.kind === "toc" && (
@@ -196,10 +212,18 @@ export function PreviewViewer({
               Previous
             </Button>
             <div className="flex flex-col items-center gap-1">
-              <p className="text-xs text-white/80">
+              <p className="text-sm text-white">
                 {(usePdf ? page?.label : htmlPage?.label) ?? "Page"} · {pageIndex + 1}/{total || 1}
               </p>
-              <Link href={closeHref} className="text-sm text-white/90 underline hover:text-white">
+              {allowDownload && data.catalogItemId ? (
+                <a
+                  href={`/api/store/free?item=${encodeURIComponent(data.catalogItemId)}&lang=${encodeURIComponent(data.editionLocale || "en")}`}
+                  className="text-sm font-medium text-white underline"
+                >
+                  Download
+                </a>
+              ) : null}
+              <Link href={closeHref} className="text-sm text-white underline">
                 Close
               </Link>
             </div>

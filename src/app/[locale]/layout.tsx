@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -5,7 +6,21 @@ import { SiteHeader } from "@/components/site-header";
 import { CrudNotice } from "@/components/ui/crud-notice";
 import { getSessionUser } from "@/lib/auth";
 import { dirFor, isLocale, t, type Locale } from "@/lib/i18n";
-import { publicNav, workNav } from "@/lib/navigation";
+import { membershipCountryLabel } from "@/lib/countries";
+import { siteNav } from "@/lib/navigation";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale: raw } = await params;
+  const locale = isLocale(raw) ? raw : "en";
+  return {
+    title: `${t(locale, "brand")} — ${t(locale, "brandSub")}`,
+    description: `${t(locale, "tagline")}. ${t(locale, "motto")}`,
+  };
+}
 
 export default async function LocaleLayout({
   children,
@@ -23,13 +38,13 @@ export default async function LocaleLayout({
       <SiteHeader
         locale={locale}
         signedIn={Boolean(session)}
-        publicLinks={publicNav(locale)}
-        workLinks={session ? workNav(session.user, locale) : []}
+        countryLabel={session ? membershipCountryLabel(session.user.memberships) : ""}
+        groups={siteNav(session?.user ?? null, locale)}
       />
       <CrudNotice />
       <main className="flex-1">{children}</main>
-      <footer className="border-t border-[var(--line)]/70 px-4 py-6 text-sm text-[var(--muted)]">
-        <div className="mx-auto flex max-w-6xl flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+      <footer className="border-t border-[var(--line)]/70 py-6 text-base text-[var(--ink)]">
+        <div className="shell flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
           <span>
             {t(locale, "brand")} · {t(locale, "brandSub")}
           </span>

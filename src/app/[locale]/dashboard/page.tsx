@@ -2,10 +2,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
 import { permissionsForUser, roleLabel, SYSTEM_ROLE_DEFS } from "@/lib/rbac";
-import { publicNav, workNav } from "@/lib/navigation";
-import { isLocale, type Locale } from "@/lib/i18n";
+import { siteNav } from "@/lib/navigation";
+import { isLocale, t, type Locale } from "@/lib/i18n";
 import { Badge } from "@/components/ui/badge";
 import { ClientRedirect } from "@/components/admin/client-redirect";
+import { formatStamp } from "@/lib/utils";
 import { DashboardLogout } from "./dashboard-logout";
 
 export default async function DashboardPage({ params }: { params: Promise<{ locale: string }> }) {
@@ -80,16 +81,15 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
     });
   }
 
-  const workLinks = workNav(user, locale).filter((link) => link.id !== "dashboard");
-  const publicLinks = publicNav(locale).filter((link) => link.id !== "home");
+  const groups = siteNav(user, locale);
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10">
+    <div className="shell py-10">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">Signed-in dashboard</p>
+          <p className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">{t(locale, "Dashboard")}</p>
           <h1 className="font-[family-name:var(--font-display)] text-3xl sm:text-4xl">
-            Welcome, {user.name}
+            {t(locale, "Welcome")}, {user.name}
           </h1>
           <p className="mt-2 text-sm text-[var(--muted)]">
             {user.email}
@@ -120,7 +120,7 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
             .
           </div>
         ) : (
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {roleCards.map((r) => (
               <article key={r.id} className="panel space-y-3 p-5">
                 <div className="flex flex-wrap items-start justify-between gap-2">
@@ -129,10 +129,7 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
                     <p className="font-mono text-xs text-[var(--muted)]">{r.code}</p>
                   </div>
                   <div className="flex flex-wrap gap-1">
-                    <Badge tone="info">{r.scope}</Badge>
-                    {SYSTEM_ROLE_DEFS.some((s) => s.code === r.code) && (
-                      <Badge tone="ok">system</Badge>
-                    )}
+                    <Badge tone="info">{r.scope === "GLOBAL" ? "System admin" : "Organisation role"}</Badge>
                   </div>
                 </div>
                 {r.description && (
@@ -144,7 +141,7 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
                   </p>
                 )}
                 <p className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
-                  Granted {new Date(r.grantedAt).toLocaleString()}
+                  {`Granted ${formatStamp(r.grantedAt)}`}
                 </p>
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
@@ -213,41 +210,19 @@ export default async function DashboardPage({ params }: { params: Promise<{ loca
         </div>
       </section>
 
-      <section className="mt-8">
-        <h2 className="text-lg font-semibold">Your work</h2>
-        {workLinks.length === 0 ? (
-          <p className="mt-3 text-sm text-[var(--muted)]">No desks are open for the roles on this account.</p>
-        ) : (
+      {groups.map((group) => (
+        <section key={group.id} className="mt-8">
+          <h2 className="text-lg font-semibold">{group.label}</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {workLinks.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className="panel block p-4 transition hover:bg-[var(--surface-2)]"
-              >
+            {group.links.map((link) => (
+              <Link key={link.href} href={link.href} className="panel block p-4 transition hover:bg-[var(--surface-2)]">
                 <h3 className="font-medium text-[var(--ink)]">{link.label}</h3>
                 {link.blurb && <p className="mt-1 text-sm text-[var(--muted)]">{link.blurb}</p>}
               </Link>
             ))}
           </div>
-        )}
-      </section>
-
-      <section className="mt-8">
-        <h2 className="text-lg font-semibold">Public path</h2>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {publicLinks.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className="panel block p-4 transition hover:bg-[var(--surface-2)]"
-            >
-              <h3 className="font-medium text-[var(--ink)]">{link.label}</h3>
-              {link.blurb && <p className="mt-1 text-sm text-[var(--muted)]">{link.blurb}</p>}
-            </Link>
-          ))}
-        </div>
-      </section>
+        </section>
+      ))}
     </div>
   );
 }

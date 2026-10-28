@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { can } from "@/lib/rbac";
+import { certificationBodyIds, hasGlobalPermission } from "@/lib/rbac";
 import type { AuthedSession } from "@/lib/require-auth";
 import { isCountryCode } from "@/lib/countries";
 import { deleteTradeProduct, ProductRecordError } from "@/lib/product-record";
@@ -13,9 +13,13 @@ export function assertCanManageClient(
   if (!TRADE.includes(organization.type)) {
     throw new ProductRecordError("Choose a manufacturer or importer");
   }
-  if (can(session.user, "cb:write")) return;
-  const ownCb = session.user.memberships.find((membership) => membership.organization.type === "CB")?.organization.id;
-  if (ownCb && organization.servicingCbId === ownCb) return;
+  if (hasGlobalPermission(session.user, "cb:write")) return;
+  if (
+    organization.servicingCbId &&
+    certificationBodyIds(session.user).includes(organization.servicingCbId)
+  ) {
+    return;
+  }
   throw new ProductRecordError("You can only change clients of your certification body", 403);
 }
 
@@ -35,7 +39,7 @@ export async function updateTradeClient(session: AuthedSession, id: string, body
   if (!isCountryCode(countryIso2)) throw new ProductRecordError("Choose a country");
 
   let servicingCbId = organization.servicingCbId;
-  if (can(session.user, "cb:write") && body.cbOrganizationId != null) {
+  if (hasGlobalPermission(session.user, "cb:write") && body.cbOrganizationId != null) {
     const cbId = String(body.cbOrganizationId || "").trim();
     const cb = cbId ? await prisma.organization.findFirst({ where: { id: cbId, type: "CB" } }) : null;
     if (!cb) throw new ProductRecordError("Choose the certification body that serves this client");

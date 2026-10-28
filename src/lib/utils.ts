@@ -15,3 +15,17 @@ export function formatCents(cents: number, currency = "USD") {
     currency,
   }).format(cents / 100);
 }
+
+/** Fixed zone and calendar so server HTML and the browser render the same text. */
+export function formatStamp(value: Date | string) {
+  const date = typeof value === "string" ? new Date(value) : value;
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone: "Africa/Nairobi",
+  }).format(date);
+}

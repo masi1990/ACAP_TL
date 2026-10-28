@@ -15,6 +15,7 @@ import {
   CRITICAL_IMPACT_DOMAINS,
   FIDELITY_PRINCIPLES,
 } from "@/lib/fidelity";
+import { resolvePython } from "@/lib/python-bin";
 import { extractClause1ScopeOnly } from "@/lib/scope-text";
 
 const execFileAsync = promisify(execFile);
@@ -320,7 +321,8 @@ print(len(doc))
   const pyPath = path.join(tmpDir, "extract.py");
   await writeFile(pyPath, script);
   try {
-    await execFileAsync("python3", [pyPath, pdfPath, outPath], { maxBuffer: 20 * 1024 * 1024 });
+    const python = await resolvePython();
+    await execFileAsync(python, [pyPath, pdfPath, outPath], { maxBuffer: 20 * 1024 * 1024 });
     const { readFile } = await import("fs/promises");
     return await readFile(outPath, "utf8");
   } catch (e) {

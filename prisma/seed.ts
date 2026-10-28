@@ -16,6 +16,9 @@ const prisma = new PrismaClient();
 async function main() {
   // Clear in dependency-safe order when re-seeding without force-reset
   await prisma.$transaction([
+    prisma.institutionRequest.deleteMany(),
+    prisma.passwordReset.deleteMany(),
+    prisma.pesapalNotification.deleteMany(),
     prisma.fraudAlert.deleteMany(),
     prisma.consumerComplaint.deleteMany(),
     prisma.sanction.deleteMany(),

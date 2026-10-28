@@ -7,6 +7,7 @@ import { isAuthorityType, isTradeOrgType, permissionsFromAssignedRoles } from "@
 import { isCountryCode } from "@/lib/countries";
 import { notifyAfterCommit } from "@/lib/notifications";
 import { saveCbMarkLicences } from "@/lib/cb-licenses";
+import { resolveInstitutionShape, saveCompanyCountries, saveOperatingCountries } from "@/lib/institution-shape";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -37,7 +38,11 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     const state = await prisma.memberState.findUnique({ where: { id: String(body.memberStateId) } });
     if (!state) return NextResponse.json({ error: "Choose a member state from the list" }, { status: 400 });
   }
-  if (before.type === "CB" && body.memberStateId === "") {
+  if (
+    before.type === "CB" &&
+    body.memberStateId === "" &&
+    String(body.backing || before.backing).toUpperCase() !== "PRIVATE"
+  ) {
     return NextResponse.json({ error: "Choose a member state" }, { status: 400 });
   }
   const status =
@@ -57,11 +62,33 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     }
   }
 
+  const nextType = body.type != null ? String(body.type).toUpperCase() : before.type;
+  const shape = await resolveInstitutionShape({
+    type: nextType,
+    backing: body.backing != null ? body.backing : before.backing,
+    alsoCertifies: body.alsoCertifies != null ? body.alsoCertifies : before.alsoCertifies,
+    memberStateId: body.memberStateId === undefined ? before.memberStateId : body.memberStateId || null,
+    operatingCountryIds: body.operatingCountryIds,
+    requireCountry: false,
+  });
+  if (shape.error) return NextResponse.json({ error: shape.error }, { status: 400 });
+  if (
+    (nextType === "NSB" || (nextType === "CB" && shape.shape.backing === "GOVERNMENT")) &&
+    !shape.shape.memberStateId
+  ) {
+    return NextResponse.json({ error: "Choose a country" }, { status: 400 });
+  }
+  if (nextType === "CB" && shape.shape.backing === "PRIVATE" && body.operatingCountryIds && !shape.shape.operatingCountryIds.length) {
+    return NextResponse.json({ error: "Choose at least one country this certification body operates in" }, { status: 400 });
+  }
+
   const row = await prisma.organization.update({
     where: { id },
     data: {
       name: body.name != null ? String(body.name).trim() : undefined,
-      memberStateId: body.memberStateId === undefined ? undefined : body.memberStateId || null,
+      memberStateId: shape.shape.memberStateId,
+      backing: shape.shape.backing,
+      alsoCertifies: shape.shape.alsoCertifies,
       type:
         body.type != null &&
         (isAuthorityType(String(body.type)) || isTradeOrgType(String(body.type)))
@@ -77,6 +104,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
       servicingCbId,
     },
   });
+
+  if (Array.isArray(body.operatingCountryIds)) {
+    await saveOperatingCountries(id, shape.shape.operatingCountryIds);
+  }
 
   if (before.type === "CB" || row.type === "CB") {
     const licence = await saveCbMarkLicences(id, body);
@@ -115,6 +146,12 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
             countryIso2,
           },
         });
+        if (Array.isArray(body.operatingCountryIds)) {
+          await saveCompanyCountries(
+            company.id,
+            body.operatingCountryIds.map((countryId: unknown) => String(countryId)),
+          );
+        }
       }
     }
   }

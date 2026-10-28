@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { describeImportedPin, markSchemeLabel, normalizePinInput, registryStatus } from "@/lib/imported-marks";
 
 /** REST verify/lookup for single-window adapters */
 export async function GET(req: NextRequest) {
@@ -8,13 +9,29 @@ export async function GET(req: NextRequest) {
   const rl = await checkRateLimit(`adapter-verify:${ip}`, 120, 60_000);
   if (!rl.allowed) return NextResponse.json({ error: "rate_limited" }, { status: 429 });
 
-  const pin = req.nextUrl.searchParams.get("pin");
+  const pin = normalizePinInput(req.nextUrl.searchParams.get("pin") || "");
   const certificateNo = req.nextUrl.searchParams.get("certificateNo");
   if (!pin && !certificateNo) {
     return NextResponse.json({ error: "pin or certificateNo required" }, { status: 400 });
   }
 
   if (pin) {
+    const imported = await describeImportedPin(pin);
+    if (imported) {
+      const { mark, removed } = imported;
+      return NextResponse.json({
+        schema: "acap-tl.conformity-block.v1",
+        pin: mark.pinText,
+        status: removed ? "under_review" : registryStatus(mark.markStatus),
+        underReview: removed,
+        message: removed ? "This product is currently under review." : undefined,
+        certificateNo: mark.certificationId,
+        markScheme: markSchemeLabel(mark.markType),
+        product: mark.productName,
+        brand: mark.brand.trim() || undefined,
+        company: mark.companyName,
+      });
+    }
     const row = await prisma.productPin.findUnique({
       where: { pinCode: pin },
       include: {

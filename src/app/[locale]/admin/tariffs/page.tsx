@@ -6,8 +6,16 @@ import { isLocale, type Locale } from "@/lib/i18n";
 import { CrudForm, DeleteButton } from "@/components/admin/crud-form";
 import { ClientRedirect } from "@/components/admin/client-redirect";
 import { Badge } from "@/components/ui/badge";
+import { LinePager } from "@/components/line-pager";
+import { listHref, listPage } from "@/lib/list-page";
 
-export default async function AdminTariffsPage({ params }: { params: Promise<{ locale: string }> }) {
+export default async function AdminTariffsPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ locale: string }>;
+  searchParams: Promise<{ page?: string }>;
+}) {
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
   const locale = raw as Locale;
@@ -15,10 +23,14 @@ export default async function AdminTariffsPage({ params }: { params: Promise<{ l
   if (!session) return <ClientRedirect href={`/${locale}/login?next=/${locale}/admin/tariffs`} />;
   if (!can(session.user, "tariffs:read")) notFound();
 
+  const total = await prisma.tariffLine.count();
+  const listing = listPage((await searchParams).page, total);
   const [rows, recs] = await Promise.all([
     prisma.tariffLine.findMany({
       include: { rec: true },
       orderBy: [{ codeLength: "asc" }, { codeNormalized: "asc" }],
+      skip: listing.skip,
+      take: listing.take,
     }),
     prisma.rec.findMany({ orderBy: { code: "asc" } }),
   ]);
@@ -99,6 +111,12 @@ export default async function AdminTariffsPage({ params }: { params: Promise<{ l
           </tbody>
         </table>
       </div>
+      <LinePager
+        page={listing.page}
+        pageCount={listing.pageCount}
+        prevHref={listHref(`/${locale}/admin/tariffs`, listing.page - 1)}
+        nextHref={listHref(`/${locale}/admin/tariffs`, listing.page + 1)}
+      />
       <p className="text-xs text-[var(--muted)]">/{locale}/admin/tariffs</p>
     </div>
   );

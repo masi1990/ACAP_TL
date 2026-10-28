@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { isLocale, t, type Locale } from "@/lib/i18n";
@@ -67,6 +68,14 @@ function LoginForm() {
           {loading ? t(locale, "loading") : t(locale, "login")}
         </Button>
       </form>
+      <p className="mt-4 flex justify-between text-sm">
+        <Link className="text-[var(--accent)] underline" href={`/${locale}/register`}>
+          Create account
+        </Link>
+        <Link className="text-[var(--accent)] underline" href={`/${locale}/forgot-password`}>
+          Reset password
+        </Link>
+      </p>
     </div>
   );
 }

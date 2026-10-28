@@ -1,16 +1,18 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { notifyCrud } from "@/components/ui/crud-notice";
+import { SearchSelect } from "@/components/ui/search-select";
+import { isLocale, t, type Locale } from "@/lib/i18n";
 
 export type Field = {
   name: string;
   label: string;
-  type?: "text" | "textarea" | "number" | "select" | "multiselect" | "checkbox" | "date";
+  type?: "text" | "textarea" | "number" | "select" | "multiselect" | "checkbox" | "date" | "file";
   required?: boolean;
   placeholder?: string;
   options?: { value: string; label: string }[];
@@ -19,6 +21,8 @@ export type Field = {
   help?: string;
   /** Sent with the form and kept off the page. */
   hidden?: boolean;
+  /** Hide this field unless another field has this value. */
+  showWhen?: { field: string; equals: string };
 };
 
 export function CrudForm({
@@ -28,6 +32,8 @@ export function CrudForm({
   submitLabel = "Save",
   idPrefix = "",
   onSuccess,
+  searchable = false,
+  locale,
 }: {
   action: string;
   method?: "POST" | "PATCH";
@@ -36,10 +42,17 @@ export function CrudForm({
   /** Keeps input ids unique when several forms render on one page. */
   idPrefix?: string;
   onSuccess?: () => void;
+  /** Certification desk: select fields open a searchable list. Other forms keep the native select. */
+  searchable?: boolean;
+  locale?: Locale;
 }) {
+  const pathname = usePathname() || "";
+  const pathLocale = pathname.split("/")[1] || "";
+  const activeLocale: Locale = locale ?? (isLocale(pathLocale) ? pathLocale : "en");
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [link, setLink] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   function initialValues() {
     const init: Record<string, string> = {};
@@ -71,6 +84,8 @@ export function CrudForm({
 
   const [values, setValues] = useState<Record<string, string>>(initialValues);
   const [multiValues, setMultiValues] = useState<Record<string, string[]>>(initialMulti);
+  const [fileEpoch, setFileEpoch] = useState(0);
+  const fileRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   function toggleMulti(name: string, value: string) {
     setMultiValues((prev) => {
@@ -87,37 +102,59 @@ export function CrudForm({
     setBusy(true);
     setError(null);
     setMsg(null);
-    const body: Record<string, unknown> = {};
-    for (const f of fields) {
-      if (f.type === "multiselect") {
-        body[f.name] = multiValues[f.name] || [];
-        continue;
+    const hasFiles = fields.some((f) => f.type === "file");
+    let res: Response;
+    if (hasFiles) {
+      const form = new FormData();
+      for (const f of fields) {
+        if (f.type === "file") {
+          const file = fileRefs.current[f.name]?.files?.[0];
+          if (file && file.size > 0) form.append(f.name, file);
+          continue;
+        }
+        if (f.type === "multiselect") {
+          form.append(f.name, JSON.stringify(multiValues[f.name] || []));
+          continue;
+        }
+        form.append(f.name, values[f.name] ?? "");
       }
-      const raw = values[f.name];
-      if (f.type === "checkbox") body[f.name] = raw === "true" || raw === "on";
-      else if (f.type === "number") body[f.name] = raw === "" ? undefined : Number(raw);
-      else body[f.name] = raw;
+      res = await fetch(action, { method, body: form });
+    } else {
+      const body: Record<string, unknown> = {};
+      for (const f of fields) {
+        if (f.type === "multiselect") {
+          body[f.name] = multiValues[f.name] || [];
+          continue;
+        }
+        const raw = values[f.name];
+        if (f.type === "checkbox") body[f.name] = raw === "true" || raw === "on";
+        else if (f.type === "number") body[f.name] = raw === "" ? undefined : Number(raw);
+        else body[f.name] = raw;
+      }
+      res = await fetch(action, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
     }
-    const res = await fetch(action, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
     const data = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) {
-      const message = data.error || "Request failed";
+      const message = data.error || t(activeLocale, "Request failed");
       setError(message);
       notifyCrud("error", message);
       return;
     }
+    const note = typeof data.message === "string" ? data.message : method === "POST" ? t(activeLocale, "Created") : t(activeLocale, "Updated");
+    setLink(typeof data.setPasswordUrl === "string" ? data.setPasswordUrl : null);
     if (method === "POST") {
       setValues(blankValues());
       setMultiValues(initialMulti());
-      setMsg("Created");
+      setFileEpoch((n) => n + 1);
+      setMsg(note);
       notifyCrud("created");
     } else {
-      setMsg("Updated");
+      setMsg(note);
       notifyCrud("updated");
     }
     onSuccess?.();
@@ -125,20 +162,17 @@ export function CrudForm({
   }
 
   return (
-    <form onSubmit={onSubmit} autoComplete="off" className="panel grid gap-3 p-4 sm:grid-cols-2">
+    <form onSubmit={onSubmit} autoComplete="off" className="panel grid max-w-2xl gap-3 p-4">
       {fields.map((f) => {
         if (f.hidden) return null;
+        if (f.showWhen && values[f.showWhen.field] !== f.showWhen.equals) return null;
         const fieldId = `${idPrefix}${f.name}`;
         return (
         <div
           key={f.name}
-          className={
-            f.type === "textarea" || f.type === "multiselect"
-              ? "grid gap-1 sm:col-span-2"
-              : "grid gap-1"
-          }
+          className="grid gap-1"
         >
-          <Label htmlFor={fieldId}>{f.label}</Label>
+          <Label htmlFor={fieldId}>{t(activeLocale, f.label)}</Label>
           {f.type === "textarea" ? (
             <textarea
               id={fieldId}
@@ -148,6 +182,25 @@ export function CrudForm({
               placeholder={f.placeholder}
               className="min-h-24 w-full rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-sm"
             />
+          ) : f.type === "select" && searchable ? (
+            <div className="relative">
+              <SearchSelect
+                id={fieldId}
+                value={values[f.name] || ""}
+                onChange={(next) => setValues((v) => ({ ...v, [f.name]: next }))}
+                placeholder={(f.options || []).length === 0 ? t(activeLocale, "Nothing to choose yet") : t(activeLocale, "Select…")}
+                searchPlaceholder={`Search ${f.label.toLowerCase()}`}
+                options={f.options || []}
+              />
+              <input
+                tabIndex={-1}
+                aria-hidden
+                className="pointer-events-none absolute h-0 w-0 opacity-0"
+                value={values[f.name] || ""}
+                required={f.required}
+                onChange={() => undefined}
+              />
+            </div>
           ) : f.type === "select" ? (
             <select
               id={fieldId}
@@ -156,15 +209,10 @@ export function CrudForm({
               onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
               className="h-10 w-full rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 text-sm"
             >
-              <option value="">Select…</option>
-              {(f.options || []).length === 0 && (
-                <option value="" disabled>
-                  Nothing to choose yet
-                </option>
-              )}
+              <option value="">{(f.options || []).length === 0 ? t(activeLocale, "Nothing to choose yet") : t(activeLocale, "Select…")}</option>
               {(f.options || []).map((o) => (
                 <option key={o.value} value={o.value}>
-                  {o.label}
+                  {t(activeLocale, o.label)}
                 </option>
               ))}
             </select>
@@ -194,16 +242,25 @@ export function CrudForm({
                         checked={checked}
                         onChange={() => toggleMulti(f.name, o.value)}
                       />
-                      <span className="leading-snug">{o.label}</span>
+                      <span className="leading-snug">{t(activeLocale, o.label)}</span>
                     </label>
                   );
                 })}
               </div>
               <p className="mt-1 text-xs text-[var(--muted)]">
-                {(multiValues[f.name] || []).length} selected
-                {f.help ? ` · ${f.help}` : ""}
+                {`${(multiValues[f.name] || []).length} ${t(activeLocale, "selected")}${f.help ? ` · ${t(activeLocale, f.help)}` : ""}`}
               </p>
             </div>
+          ) : f.type === "file" ? (
+            <Input
+              key={`${fieldId}-${fileEpoch}`}
+              id={fieldId}
+              type="file"
+              accept=".pdf,application/pdf"
+              ref={(node) => {
+                fileRefs.current[f.name] = node;
+              }}
+            />
           ) : f.type === "checkbox" ? (
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -225,16 +282,25 @@ export function CrudForm({
               placeholder={f.placeholder}
             />
           )}
-          {f.help && f.type !== "multiselect" ? <p className="text-xs text-[var(--muted)]">{f.help}</p> : null}
+          {f.help && f.type !== "multiselect" ? <p className="text-xs text-[var(--muted)]">{t(activeLocale, f.help)}</p> : null}
         </div>
         );
       })}
-      <div className="flex items-center gap-3 sm:col-span-2">
+      <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" disabled={busy}>
-          {busy ? "Saving…" : submitLabel}
+          {busy ? t(activeLocale, "Saving…") : t(activeLocale, submitLabel)}
         </Button>
         {error && <p className="text-sm text-rose-700">{error}</p>}
         {msg && <p className="text-sm text-emerald-800">{msg}</p>}
+        {link && (
+          <input
+            readOnly
+            value={link}
+            aria-label="Set-password link"
+            className="h-10 min-w-0 flex-1 rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 text-xs"
+            onFocus={(event) => event.currentTarget.select()}
+          />
+        )}
       </div>
     </form>
   );

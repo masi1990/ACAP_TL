@@ -37,7 +37,7 @@ export default async function PublicStandardPreviewPage({
         data={{ ...data, catalogItemId: data.catalogItemId }}
         closeHref={`/${locale}/lookup`}
       />
-      <div className="mx-auto max-w-3xl px-4 py-20 text-center text-sm text-[var(--muted)]">
+      <div className="shell py-20 text-center text-sm text-[var(--muted)]">
         Loading standard preview…
       </div>
     </div>

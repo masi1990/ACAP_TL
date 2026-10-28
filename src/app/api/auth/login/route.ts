@@ -8,6 +8,12 @@ export async function POST(req: NextRequest) {
   const email = String(body.email || "").toLowerCase().trim();
   const password = String(body.password || "");
   const user = await prisma.userAccount.findUnique({ where: { email } });
+  if (user?.mustChangePassword) {
+    return NextResponse.json(
+      { error: "Set a password from the link sent to you before you sign in" },
+      { status: 403 },
+    );
+  }
   if (!user || !(await verifyPassword(password, user.passwordHash))) {
     return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
   }

@@ -9,9 +9,55 @@ import { CrudForm, DeleteButton } from "@/components/admin/crud-form";
 import { ClientRedirect } from "@/components/admin/client-redirect";
 import { Badge } from "@/components/ui/badge";
 import { AUTHORITATIVE_LOCALES, PUBLICATION_STATUSES } from "@/lib/publication";
-import { formatCents } from "@/lib/utils";
+import { adoptionRate, LANGUAGE_FILE_FIELDS, publishedLocales, STANDARD_KINDS, standardKindLabel } from "@/lib/standard-kinds";
+import { webstoreListingLabel } from "@/lib/catalog-access";
+import { LinePager } from "@/components/line-pager";
+import { listHref, listPage } from "@/lib/list-page";
+import { extractAssessmentDrafts, type AssessmentDraft } from "@/lib/standard-assessment";
+import { DeskTabs } from "../../cb/desk-tabs";
+import { StandardRequirements } from "./standard-requirements";
 
-export default async function AdminStandardsPage({ params }: { params: Promise<{ locale: string }> }) {
+function draftsForVersion(machineDocJson: string, requirementsJson: string, designation: string) {
+  let machine: {
+    fullText?: string;
+    requirements?: Array<{ id?: string; clause?: string; text?: string }>;
+    clauses?: Array<{ number?: string; title?: string; body?: string }>;
+    standard?: { designation?: string };
+  } = {};
+  try {
+    machine = JSON.parse(machineDocJson);
+  } catch {
+    machine = {};
+  }
+  if (!machine.standard?.designation) machine.standard = { designation };
+  if (!machine.requirements?.length && requirementsJson) {
+    try {
+      const parsed = JSON.parse(requirementsJson) as Array<{ id?: string; clause?: string; text?: string }>;
+      if (Array.isArray(parsed)) machine.requirements = parsed;
+    } catch {
+      /* stored requirements are not JSON */
+    }
+  }
+  return extractAssessmentDrafts(machine);
+}
+
+function groupDrafts(items: AssessmentDraft[]) {
+  const groups: { section: string; items: AssessmentDraft[] }[] = [];
+  for (const item of items) {
+    const last = groups[groups.length - 1];
+    if (!last || last.section !== item.section) groups.push({ section: item.section || "Requirements", items: [item] });
+    else last.items.push(item);
+  }
+  return groups;
+}
+
+export default async function AdminStandardsPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ locale: string }>;
+  searchParams: Promise<{ page?: string }>;
+}) {
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
   const locale = raw as Locale;
@@ -19,25 +65,51 @@ export default async function AdminStandardsPage({ params }: { params: Promise<{
   if (!session) return <ClientRedirect href={`/${locale}/login?next=/${locale}/admin/standards`} />;
   if (!can(session.user, "standards:read")) notFound();
 
-  const [rows, tariffs] = await Promise.all([
+  const total = await prisma.standard.count();
+  const listing = listPage((await searchParams).page, total);
+  const [rows, tariffs, requirementStandards, sectors, memberStates, memberStateTotal] = await Promise.all([
     prisma.standard.findMany({
       include: {
+        technicalCommittee: { include: { sector: true } },
+        adoptions: { include: { memberState: true } },
         versions: {
           orderBy: { year: "desc" },
           include: {
             catalogItem: true,
+            languageFiles: true,
             tariffMaps: { include: { tariffLine: { include: { rec: true } } } },
             _count: { select: { tariffMaps: true } },
           },
         },
       },
       orderBy: { designation: "asc" },
+      skip: listing.skip,
+      take: listing.take,
     }),
     prisma.tariffLine.findMany({
       include: { rec: true },
       orderBy: [{ codeNormalized: "asc" }],
       take: 500,
     }),
+    prisma.standard.findMany({
+      orderBy: { designation: "asc" },
+      select: {
+        id: true,
+        designation: true,
+        titleEn: true,
+        versions: {
+          orderBy: { year: "desc" },
+          take: 1,
+          select: { machineDocJson: true, requirementsJson: true },
+        },
+      },
+    }),
+    prisma.sector.findMany({
+      include: { committees: { orderBy: { code: "asc" } } },
+      orderBy: { code: "asc" },
+    }),
+    prisma.memberState.findMany({ orderBy: { name: "asc" } }),
+    prisma.memberState.count(),
   ]);
 
   const canWrite = can(session.user, "standards:write");
@@ -45,12 +117,56 @@ export default async function AdminStandardsPage({ params }: { params: Promise<{
   const canImport = can(session.user, "standards:import");
   const canFullPreview = can(session.user, "standards:preview_full");
 
+  const committeeOptions = sectors.flatMap((sector) =>
+    sector.committees.map((committee) => ({
+      value: committee.id,
+      label: `${sector.code} · ${committee.code} — ${committee.name}`,
+    })),
+  );
+  const countryOptions = memberStates.map((state) => ({
+    value: state.id,
+    label: `${state.name} (${state.iso2})`,
+  }));
+  const languageFileFields = LANGUAGE_FILE_FIELDS.map((item) => ({
+    name: item.field,
+    label: item.label,
+    type: "file" as const,
+    help: "Optional PDF for this language. Buyers preview and purchase the language they choose.",
+  }));
   const tariffOptions = tariffs.map((t) => ({
     value: t.id,
     label: `${t.codeDisplay} · ${t.rec.code} — ${t.description.slice(0, 80)}${t.description.length > 80 ? "…" : ""}`,
   }));
 
+  const requirementSets = requirementStandards.map((standard) => {
+    const version = standard.versions[0];
+    const drafts = version
+      ? draftsForVersion(version.machineDocJson, version.requirementsJson, standard.designation)
+      : [];
+    return {
+      id: standard.id,
+      label: `${standard.designation} — ${standard.titleEn}`,
+      groups: groupDrafts(drafts).map((group) => ({
+        section: group.section,
+        items: group.items.map((item) => ({
+          itemKey: item.itemKey,
+          clause: item.clause,
+          heading: item.heading,
+          text: item.text,
+          testMethod: item.testMethod,
+          kind: item.kind,
+        })),
+      })),
+    };
+  });
+
   return (
+    <DeskTabs
+      tabs={[
+        {
+          id: "standards",
+          label: "Standards",
+          content: (
     <div className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
@@ -82,6 +198,22 @@ export default async function AdminStandardsPage({ params }: { params: Promise<{
             fields={[
               { name: "designation", label: "Designation", required: true, placeholder: "ARS 464" },
               { name: "titleEn", label: "Title (EN)", required: true, placeholder: "Milled rice — Specification" },
+              {
+                name: "kind",
+                label: "Category",
+                type: "select",
+                required: true,
+                defaultValue: "PRODUCT",
+                options: STANDARD_KINDS.map((kind) => ({ value: kind.value, label: kind.label })),
+              },
+              {
+                name: "technicalCommitteeId",
+                label: "Technical committee",
+                type: "select",
+                required: true,
+                options: committeeOptions,
+                help: committeeOptions.length ? undefined : "Create a sector and technical committee first.",
+              },
               { name: "year", label: "Year", type: "number", defaultValue: new Date().getFullYear() },
               { name: "editionLabel", label: "Edition label", placeholder: "ARS 464:2026" },
               {
@@ -115,6 +247,14 @@ export default async function AdminStandardsPage({ params }: { params: Promise<{
                 options: tariffOptions,
                 help: "One standard may map to many HS / REC lines. Select all that apply.",
               },
+              {
+                name: "memberStateIds",
+                label: "Adopting countries",
+                type: "multiselect",
+                options: countryOptions,
+                help: "Select every African Union member state that has adopted this standard.",
+              },
+              ...languageFileFields,
             ]}
           />
           <p className="text-xs text-[var(--muted)]">
@@ -130,6 +270,10 @@ export default async function AdminStandardsPage({ params }: { params: Promise<{
             <tr className="border-b border-[var(--line)] bg-[var(--surface-2)] text-[var(--muted)]">
               <th className="px-4 py-2">Designation</th>
               <th className="px-4 py-2">Title</th>
+              <th className="px-4 py-2">Category</th>
+              <th className="px-4 py-2">Committee</th>
+              <th className="px-4 py-2">Adoption</th>
+              <th className="px-4 py-2">Languages</th>
               <th className="px-4 py-2">Version</th>
               <th className="px-4 py-2">Tariff lines</th>
               <th className="px-4 py-2">Store</th>
@@ -139,7 +283,7 @@ export default async function AdminStandardsPage({ params }: { params: Promise<{
           <tbody>
             {rows.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-[var(--muted)]">
+                <td colSpan={10} className="px-4 py-8 text-center text-[var(--muted)]">
                   No standards yet — import a PDF/Word or create manually.
                 </td>
               </tr>
@@ -151,6 +295,32 @@ export default async function AdminStandardsPage({ params }: { params: Promise<{
                 <tr className="border-b border-[var(--line)]/50 align-top">
                   <td className="px-4 py-3 font-mono font-medium">{r.designation}</td>
                   <td className="px-4 py-3">{r.titleEn}</td>
+                  <td className="px-4 py-3">{standardKindLabel(r.kind, locale)}</td>
+                  <td className="px-4 py-3">
+                    {r.technicalCommittee ? (
+                      <>
+                        <div>{r.technicalCommittee.sector.name}</div>
+                        <div className="text-[var(--muted)]">
+                          {r.technicalCommittee.code} — {r.technicalCommittee.name}
+                        </div>
+                      </>
+                    ) : (
+                      <span className="text-[var(--muted)]">Unassigned</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    {(() => {
+                      const rate = adoptionRate(r.adoptions.length, memberStateTotal);
+                      return `${rate.adopted} of ${rate.total} · ${rate.percent}%`;
+                    })()}
+                  </td>
+                  <td className="px-4 py-3">
+                    {v
+                      ? publishedLocales(v.languageFiles, v.authoritativeLocale, v.sourcePdfUri)
+                          .map((code) => code.toUpperCase())
+                          .join(", ") || "—"
+                      : "—"}
+                  </td>
                   <td className="px-4 py-3">
                     {v ? (
                       <>
@@ -181,11 +351,7 @@ export default async function AdminStandardsPage({ params }: { params: Promise<{
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    {v?.catalogItem?.active ? (
-                      <span>{formatCents(v.catalogItem.priceCents, v.catalogItem.currency)}</span>
-                    ) : (
-                      <span className="text-[var(--muted)]">No price</span>
-                    )}
+                    <span>{webstoreListingLabel(v?.catalogItem)}</span>
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex flex-wrap items-center justify-end gap-2">
@@ -203,7 +369,7 @@ export default async function AdminStandardsPage({ params }: { params: Promise<{
                 </tr>
                 {canWrite && (
                   <tr key={`${r.id}-edit`} className="border-b border-[var(--line)]/50">
-                    <td colSpan={6} className="bg-[var(--surface-2)]/40 px-4 py-3">
+                    <td colSpan={10} className="bg-[var(--surface-2)]/40 px-4 py-3">
                       <details>
                         <summary className="cursor-pointer text-sm font-medium text-[var(--accent)]">
                           Edit {r.designation}
@@ -220,6 +386,22 @@ export default async function AdminStandardsPage({ params }: { params: Promise<{
                                 label: "Designation",
                                 required: true,
                                 defaultValue: r.designation,
+                              },
+                              {
+                                name: "kind",
+                                label: "Category",
+                                type: "select",
+                                required: true,
+                                defaultValue: r.kind,
+                                options: STANDARD_KINDS.map((kind) => ({ value: kind.value, label: kind.label })),
+                              },
+                              {
+                                name: "technicalCommitteeId",
+                                label: "Technical committee",
+                                type: "select",
+                                required: true,
+                                defaultValue: r.technicalCommitteeId ?? "",
+                                options: committeeOptions,
                               },
                               {
                                 name: "titleEn",
@@ -277,6 +459,15 @@ export default async function AdminStandardsPage({ params }: { params: Promise<{
                                 defaultValue: v?.tariffMaps.map((m) => m.tariffLineId) ?? [],
                                 help: "One standard may map to many HS / REC lines.",
                               },
+                              {
+                                name: "memberStateIds",
+                                label: "Adopting countries",
+                                type: "multiselect",
+                                options: countryOptions,
+                                defaultValue: r.adoptions.map((adoption) => adoption.memberStateId),
+                                help: "Select every African Union member state that has adopted this standard.",
+                              },
+                              ...languageFileFields,
                             ]}
                           />
                         </div>
@@ -290,6 +481,31 @@ export default async function AdminStandardsPage({ params }: { params: Promise<{
           </tbody>
         </table>
       </div>
+      <LinePager
+        page={listing.page}
+        pageCount={listing.pageCount}
+        prevHref={listHref(`/${locale}/admin/standards`, listing.page - 1)}
+        nextHref={listHref(`/${locale}/admin/standards`, listing.page + 1)}
+      />
     </div>
+          ),
+        },
+        {
+          id: "requirements",
+          label: "Requirements",
+          content: (
+            <section className="space-y-8">
+              <div>
+                <h2 className="text-xl font-semibold">Requirements</h2>
+                <p className="mt-1 max-w-2xl text-sm text-[var(--muted)]">
+                  The same rows the certification desk loads from each standard: clause text, limits, and test methods.
+                </p>
+              </div>
+              <StandardRequirements sets={requirementSets} canPreview={canFullPreview} canWrite={canWrite} />
+            </section>
+          ),
+        },
+      ]}
+    />
   );
 }

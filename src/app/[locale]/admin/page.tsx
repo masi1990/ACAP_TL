@@ -2,7 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { authorityOwnerStateIds, can } from "@/lib/rbac";
-import { isLocale, type Locale } from "@/lib/i18n";
+import { isLocale, t, type Locale } from "@/lib/i18n";
 import { notFound } from "next/navigation";
 
 export default async function AdminHomePage({ params }: { params: Promise<{ locale: string }> }) {
@@ -11,11 +11,12 @@ export default async function AdminHomePage({ params }: { params: Promise<{ loca
   const locale = raw as Locale;
   const session = await getSessionUser();
 
-  const [standards, priced, recs, tariffs, cbs, manufacturers, roles] = await Promise.all([
+  const [standards, priced, recs, tariffs, sectors, cbs, manufacturers, roles, orders, audits, copiedMarks] = await Promise.all([
     prisma.standard.count(),
-    prisma.catalogItem.count({ where: { active: true, priceCents: { gt: 0 } } }),
+    prisma.catalogItem.count({ where: { active: true } }),
     prisma.rec.count(),
     prisma.tariffLine.count(),
+    prisma.sector.count(),
     prisma.organization.count({
       where: { type: { in: ["CB", "NSB", "REGULATOR", "CUSTOMS", "MARKET_SURVEILLANCE", "ENTRY_POINT_OP"] } },
     }),
@@ -23,9 +24,19 @@ export default async function AdminHomePage({ params }: { params: Promise<{ loca
       where: { type: { in: ["MANUFACTURER", "IMPORTER", "CLIENT"] } },
     }),
     prisma.roleDefinition.count(),
+    prisma.order.count(),
+    prisma.auditEvent.count(),
+    prisma.importedCertifiedMark.count(),
   ]);
 
   const cards = [
+    {
+      title: "Copied marks",
+      count: copiedMarks,
+      href: `/${locale}/admin/imported-marks`,
+      blurb: "Certified products held in this hub. Link the manufacturer, certification body, and standard.",
+      show: session && (can(session.user, "products:read") || can(session.user, "portal:operate")),
+    },
     {
       title: "1. RECs",
       count: recs,
@@ -41,6 +52,13 @@ export default async function AdminHomePage({ params }: { params: Promise<{ loca
       show: session && can(session.user, "tariffs:read"),
     },
     {
+      title: "Sectors & committees",
+      count: sectors,
+      href: `/${locale}/admin/sectors`,
+      blurb: "A sector has many technical committees. Each standard belongs to one committee.",
+      show: session && can(session.user, "standards:read"),
+    },
+    {
       title: "3. Standards",
       count: standards,
       href: `/${locale}/admin/standards`,
@@ -51,8 +69,15 @@ export default async function AdminHomePage({ params }: { params: Promise<{ loca
       title: "4. Price table",
       count: priced,
       href: `/${locale}/admin/prices`,
-      blurb: "Set a webstore price. Publishing is what puts the standard on the public store.",
+      blurb: "Price a standard, or list it free to read only, or free to read and download.",
       show: session && can(session.user, "standards:read"),
+    },
+    {
+      title: "Library",
+      count: null,
+      href: `/${locale}/admin/library`,
+      blurb: "Standards officers, role requests, and the standards emailed for harmonisation and adoption.",
+      show: session && (can(session.user, "institutions:write") || can(session.user, "audit:read")),
     },
     {
       title: "5. Institutions",
@@ -76,6 +101,20 @@ export default async function AdminHomePage({ params }: { params: Promise<{ loca
       href: `/${locale}/admin/roles`,
       blurb: "Who may edit the catalogue, operate a certification body, or work the later desks.",
       show: session && can(session.user, "roles:read"),
+    },
+    {
+      title: "Webstore orders",
+      count: orders,
+      href: `/${locale}/admin/orders`,
+      blurb: "Track store purchases and copy the watermarked download link when a buyer asks for it again.",
+      show: session && can(session.user, "audit:read"),
+    },
+    {
+      title: "Audit trail",
+      count: audits,
+      href: `/${locale}/admin/audit`,
+      blurb: "Who changed a record, including catalogue edits and completed store purchases.",
+      show: session && can(session.user, "audit:read"),
     },
   ].filter((c) => c.show);
 

@@ -2,16 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { appendAuditEvent } from "@/lib/audit";
 import { issueCertificateOfConformity } from "@/lib/coc";
-import { can } from "@/lib/rbac";
+import { certificationBodyIds, hasGlobalPermission } from "@/lib/rbac";
 import { requirePermission, type AuthedSession } from "@/lib/require-auth";
 import { isCountryCode } from "@/lib/countries";
 import { originClaimFromBody } from "@/lib/origin-claim";
 import {
   assertCanManageTradeOrg,
   createTradeProduct,
+  ecoTrackFromBody,
   ensureCompany,
   ProductRecordError,
+  resolveCertifyingCb,
   resolveTariffLineId,
+  submittedApplicationStatus,
 } from "@/lib/product-record";
 import {
   notifyAfterCommit,
@@ -20,8 +23,6 @@ import {
   queueInspectionNonConform,
   queueSurveillanceOpened,
 } from "@/lib/notifications";
-import { requestedClientMark } from "@/lib/cb-licenses";
-
 type Ctx = { params: Promise<{ action: string }> };
 
 function fail(message: string, status = 400) {
@@ -110,12 +111,9 @@ async function registerProduct(session: AuthedSession, body: Record<string, unkn
 
   const claim = originClaimFromBody(body, { importer: organization.type === "IMPORTER" });
   const companyId = await ensureCompany(organization, claim.originIso2);
-  let markScheme: "QUALITY" | "ECO" = "QUALITY";
-  try {
-    markScheme = requestedClientMark(body.markScheme);
-  } catch (err) {
-    return fail(err instanceof Error ? err.message : "Choose a mark");
-  }
+  const marks = await ecoTrackFromBody(body);
+  const certifyingCbId = await resolveCertifyingCb(body.certifyingCbId, organization.servicingCbId);
+  const applicationStatus = submittedApplicationStatus(session, certifyingCbId);
   const product = await createTradeProduct({
     companyId,
     name,
@@ -124,8 +122,11 @@ async function registerProduct(session: AuthedSession, body: Record<string, unkn
     machineDocJson: version.machineDocJson,
     originClaimJson: JSON.stringify(claim),
     tariffLineId: await resolveTariffLineId(standardVersionId, body.tariffLineId),
-    servicingCbId: organization.servicingCbId,
-    markScheme,
+    servicingCbId: certifyingCbId,
+    coverage: marks.coverage,
+    ecoStandardVersionId: marks.ecoStandardVersionId,
+    ecoMachineDocJson: marks.ecoMachineDocJson,
+    applicationStatus,
   });
 
   await appendAuditEvent({
@@ -154,8 +155,11 @@ async function issueCertificate(session: AuthedSession, body: Record<string, unk
   });
   if (!application) return fail("Application not found");
 
-  const ownCb = membershipOrgId(session, ["CB"]);
-  if (ownCb && application.organizationId !== ownCb && !can(session.user, "cb:write")) {
+  const ownIds = certificationBodyIds(session.user);
+  if (
+    !hasGlobalPermission(session.user, "cb:write") &&
+    !ownIds.includes(application.organizationId)
+  ) {
     return fail("You can only issue a certificate for your certification body");
   }
 
@@ -248,14 +252,19 @@ async function recordInspection(session: AuthedSession, body: Record<string, unk
     include: { standardLinks: true },
   });
   if (!product) return fail("Product not found");
-  if (product.standardLinks.length !== 1) {
-    return fail("The product must be linked to exactly one standard");
+  const qualityLink =
+    product.standardLinks.find((link) => link.markScheme === "QUALITY") || product.standardLinks[0];
+  if (!qualityLink) return fail("The product must be linked to a standard");
+  const requestedStandard = String(body.standardVersionId || "").trim();
+  const standardVersionId = requestedStandard || qualityLink.standardVersionId;
+  if (!product.standardLinks.some((link) => link.standardVersionId === standardVersionId)) {
+    return fail("Choose one of the standards this product is certified against");
   }
 
   const row = await prisma.conformityInspection.create({
     data: {
       productId,
-      standardVersionId: product.standardLinks[0].standardVersionId,
+      standardVersionId,
       organizationId: membershipOrgId(session, ["NSB"]),
       inspectorUserId: session.userId,
       result,

@@ -22,6 +22,7 @@ export const ORG_ROLES = [
   "CUSTOMS_OFFICER",
   "INSPECTOR",
   "SURVEILLANCE_OFFICER",
+  "LIBRARY_OFFICER",
 ] as const;
 export type OrgRole = (typeof ORG_ROLES)[number];
 
@@ -77,15 +78,31 @@ export function authorityOwnerStateIds(user: { memberships?: AuthorityMembership
   return [...ids];
 }
 
+/** A primary admin may manage another authority only when it is the same type in a country they already administer. */
+export function managesSameAuthorityType(
+  user: { memberships?: AuthorityMembership[] },
+  organization: { type: string; memberStateId?: string | null },
+) {
+  if (!isAuthorityType(organization.type) || !organization.memberStateId) return false;
+  return (user.memberships ?? []).some(
+    (item) =>
+      item.role === "PRIMARY_ADMIN" &&
+      item.organization.type === organization.type &&
+      item.organization.memberStateId === organization.memberStateId,
+  );
+}
+
 /** Roles a main account may give to other people in that organisation. */
 export function assignableOrgRoles(type: string) {
   const operational =
     type === "CB"
-      ? ["CB_OFFICER"]
+      ? ["CB_OFFICER", "LIBRARY_OFFICER"]
       : type === "CUSTOMS" || type === "ENTRY_POINT_OP"
         ? ["CUSTOMS_OFFICER"]
-        : type === "NSB" || type === "REGULATOR"
-          ? ["INSPECTOR"]
+        : type === "NSB"
+          ? ["INSPECTOR", "LIBRARY_OFFICER"]
+          : type === "REGULATOR"
+            ? ["INSPECTOR"]
           : type === "MARKET_SURVEILLANCE"
             ? ["SURVEILLANCE_OFFICER"]
             : [];
@@ -100,6 +117,7 @@ export type Permission =
   | "standards:delete"
   | "standards:import"
   | "standards:preview_full"
+  | "library:download"
   | "recs:read"
   | "recs:write"
   | "recs:delete"
@@ -136,6 +154,7 @@ export const ALL_PERMISSIONS: Permission[] = [
   "standards:delete",
   "standards:import",
   "standards:preview_full",
+  "library:download",
   "recs:read",
   "recs:write",
   "recs:delete",
@@ -282,9 +301,9 @@ export const SYSTEM_ROLE_DEFS: Array<{
   },
   {
     code: "CB_OFFICER",
-    name: "CB officer",
+    name: "Certification officer",
     description:
-      "Certification body officer. Registers client manufacturers and importers, the products certified for them, laboratory results against every requirement of the standard, and the certificate.",
+      "Product certification. Registers client manufacturers and importers, the products certified for them, laboratory results against every requirement of the standard, and the certificate. This role does not grant the standards library.",
     scope: "ORG",
     permissions: [
       "standards:read",
@@ -319,6 +338,14 @@ export const SYSTEM_ROLE_DEFS: Array<{
     scope: "ORG",
     permissions: ["standards:read", "products:read", "surveillance:operate"],
   },
+  {
+    code: "LIBRARY_OFFICER",
+    name: "Standards officer",
+    description:
+      "Harmonisation and adoption of African standards. Obtains the original standard for the country this institution represents. Does not certify products.",
+    scope: "ORG",
+    permissions: ["library:download"],
+  },
 ];
 
 type Membership = { role: string; organization: { id: string; type: string } };
@@ -326,7 +353,11 @@ type Membership = { role: string; organization: { id: string; type: string } };
 type RoleCarrier = {
   rolesGlobal: string;
   memberships?: Membership[];
-  roleAssignments?: Array<{ roleCode: string; role?: { permissionsJson?: string; scope?: string } }>;
+  roleAssignments?: Array<{
+    roleCode: string;
+    organizationId?: string | null;
+    role?: { permissionsJson?: string; scope?: string };
+  }>;
 };
 
 export function parseGlobalRoles(rolesGlobal: string): string[] {
@@ -374,6 +405,41 @@ function addRolePermissions(
   }
   const builtIn = SYSTEM_ROLE_DEFS.find((role) => role.code === code);
   if (builtIn) for (const permission of builtIn.permissions) perms.add(permission);
+}
+
+/** Permissions from global role codes only. Organisation membership does not count. */
+export function hasGlobalPermission(
+  user: RoleCarrier,
+  permission: Permission,
+  rolePermissionMap?: Map<string, Permission[]>,
+) {
+  const perms = new Set<Permission>();
+  const saved = savedRolePermissions(user);
+  const codes = new Set(parseGlobalRoles(user.rolesGlobal));
+  for (const assignment of user.roleAssignments ?? []) {
+    if (!assignment.organizationId) codes.add(assignment.roleCode);
+  }
+  for (const code of codes) {
+    addRolePermissions(perms, code, saved, rolePermissionMap);
+  }
+  return perms.has(permission);
+}
+
+export function certificationBodyIds(user: {
+  memberships?: Array<{ organization: { id: string; type: string } }>;
+}) {
+  return (user.memberships ?? [])
+    .filter((membership) => membership.organization.type === "CB")
+    .map((membership) => membership.organization.id);
+}
+
+/** True when this login may act for that certification body. */
+export function userServesCertificationBody(
+  user: RoleCarrier & { memberships?: Array<{ organization: { id: string; type: string } }> },
+  organizationId: string,
+) {
+  if (hasGlobalPermission(user, "cb:write")) return true;
+  return certificationBodyIds(user).includes(organizationId);
 }
 
 /**
@@ -464,10 +530,18 @@ export function permissionsForUser(
   const perms = permissionsFromAssignedRoles(user, rolePermissionMap);
   const saved = savedRolePermissions(user);
   for (const membership of user.memberships) {
-    for (const permission of orgTypePermissions(membership.organization.type, membership.role)) {
-      perms.add(permission);
+    const codes = new Set<string>([membership.role]);
+    for (const assignment of user.roleAssignments ?? []) {
+      if (assignment.organizationId && assignment.organizationId === membership.organization.id) {
+        codes.add(assignment.roleCode);
+      }
     }
-    addRolePermissions(perms, membership.role, saved, rolePermissionMap);
+    for (const code of codes) {
+      for (const permission of orgTypePermissions(membership.organization.type, code)) {
+        perms.add(permission);
+      }
+      addRolePermissions(perms, code, saved, rolePermissionMap);
+    }
   }
   return perms;
 }
@@ -499,7 +573,8 @@ export const ORG_ROLE_LABELS: Record<string, string> = {
   ORG_ADMIN: "Organisation admin",
   ORG_USER: "Organisation user",
   ORG_VIEWER: "View only",
-  CB_OFFICER: "CB officer",
+  CB_OFFICER: "Certification officer",
+  LIBRARY_OFFICER: "Standards officer",
   CUSTOMS_OFFICER: "Customs officer",
   INSPECTOR: "Conformity inspector",
   SURVEILLANCE_OFFICER: "Market surveillance officer",
@@ -517,9 +592,18 @@ export const PUBLIC_PATH_SUFFIXES = [
   "",
   "/lookup",
   "/verify",
+  "/catalogue",
   "/store",
+  "/store/cart",
   "/store/return",
   "/registry",
   "/login",
+  "/register",
+  "/forgot-password",
+  "/reset-password",
   "/consumers",
+  "/analytics",
+  "/library",
+  "/library/register",
+  "/library/request",
 ] as const;

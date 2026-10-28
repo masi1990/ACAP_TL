@@ -1,8 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { isLocale, type Locale } from "@/lib/i18n";
+import { isLocale, t, type Locale } from "@/lib/i18n";
 import { prisma } from "@/lib/db";
 import { isMailConfigured } from "@/lib/mail";
+import { fulfillByPesapalTrackingId } from "@/lib/store-fulfillment";
+import { downloadLocaleOrder, publishedLocales } from "@/lib/standard-kinds";
+import { PaymentWait } from "../payment-wait";
+import { ClearPurchasedCart } from "../clear-purchased-cart";
 
 export default async function StoreReturnPage({
   params,
@@ -15,6 +19,7 @@ export default async function StoreReturnPage({
     status?: string;
     artifact?: string;
     error?: string;
+    wait?: string;
   }>;
 }) {
   const { locale: raw } = await params;
@@ -24,8 +29,21 @@ export default async function StoreReturnPage({
 
   let artifactUri = sp.artifact?.trim() || null;
   let orderId = sp.orderId?.trim() || null;
-  const status = (sp.status || "").toUpperCase();
+  let status = (sp.status || "").toUpperCase();
   const error = sp.error?.trim() || null;
+  const wait = Number(sp.wait || "0") || 0;
+  const trackingId = sp.OrderTrackingId?.trim() || "";
+
+  if (trackingId && !artifactUri && !error) {
+    try {
+      const outcome = await fulfillByPesapalTrackingId(trackingId);
+      status = outcome.status.toUpperCase();
+      orderId = outcome.orderId || orderId;
+      artifactUri = outcome.result?.artifactUri || artifactUri;
+    } catch {
+      status = status || "PENDING";
+    }
+  }
 
   if (!artifactUri && orderId) {
     const entitlement = await prisma.standardEntitlement.findFirst({
@@ -49,6 +67,43 @@ export default async function StoreReturnPage({
 
   const completed = status === "COMPLETED" || Boolean(artifactUri);
 
+  const languageName = (code: string) =>
+    t(locale, code === "fr" ? "French" : code === "pt" ? "Portuguese" : code === "ar" ? "Arabic" : "English");
+  const downloads: {
+    catalogItemId: string;
+    title: string;
+    preferredLocale: string;
+    languages: { locale: string; label: string }[];
+  }[] = [];
+  if (completed && orderId) {
+    const paid = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        lines: {
+          include: {
+            catalogItem: {
+              include: { standardVersion: { include: { languageFiles: true } } },
+            },
+          },
+        },
+      },
+    });
+    for (const line of paid?.lines || []) {
+      const version = line.catalogItem.standardVersion;
+      const chosen = line.editionLocale || version.authoritativeLocale || "en";
+      const codes = downloadLocaleOrder(
+        publishedLocales(version.languageFiles, version.authoritativeLocale, version.sourcePdfUri),
+        chosen,
+      );
+      downloads.push({
+        catalogItemId: line.catalogItemId,
+        title: line.catalogItem.coverTitle || version.editionLabel,
+        preferredLocale: codes[0] || chosen,
+        languages: codes.map((code) => ({ locale: code, label: languageName(code) })),
+      });
+    }
+  }
+
   return (
     <div className="mx-auto max-w-xl px-4 py-16">
       <h1 className="font-[family-name:var(--font-display)] text-3xl">
@@ -60,21 +115,58 @@ export default async function StoreReturnPage({
             ? "Pesapal did not return a tracking id. Return to the store and try again."
             : error
           : completed
-            ? "Your payment was confirmed. Download the standard in the same format that was uploaded. A license mark is added in the margin of PDF pages; the standard text is unchanged."
-            : `Pesapal reported status “${status || "PENDING"}”. If you completed payment, refresh in a moment or check your email.`}
+            ? "Your payment was confirmed. Choose a language for each standard. A license mark is added in the margin of PDF pages; the standard text is unchanged."
+            : `Pesapal status is ${status || "PENDING"}. Approve the prompt on your phone. This page picks up the payment as soon as Pesapal confirms it.`}
       </p>
+      {!error && !completed && status !== "FAILED" && <PaymentWait wait={wait} />}
       {orderId && (
         <p className="mt-2 text-sm text-[var(--muted)]">
           Order <span className="font-mono text-[var(--ink)]">{orderId}</span>
         </p>
       )}
-      {artifactUri && (
+      {completed && downloads.length > 0 ? (
+        <ClearPurchasedCart catalogItemIds={downloads.map((item) => item.catalogItemId).join(",")} />
+      ) : null}
+      {orderId && downloads.length > 0 ? (
+        <div className="mt-6 space-y-6">
+          {downloads.map((item) => (
+            <form key={item.catalogItemId} method="get" action={`/${locale}/api/store/download`} className="space-y-3">
+              <input type="hidden" name="order" value={orderId} />
+              <input type="hidden" name="item" value={item.catalogItemId} />
+              <p className="font-medium">{item.title}</p>
+              <label className="grid gap-1 text-sm">
+                <span className="font-semibold">{t(locale, "Language")}</span>
+                <select
+                  name="lang"
+                  defaultValue={item.preferredLocale}
+                  className="h-12 w-full rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 text-base"
+                >
+                  {item.languages.map((language) => (
+                    <option key={language.locale} value={language.locale}>
+                      {language.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="submit"
+                className="inline-flex h-10 items-center justify-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white"
+              >
+                Download standard
+              </button>
+            </form>
+          ))}
+          <p className="text-sm text-[var(--muted)]">
+            {isMailConfigured()
+              ? "The same download links were sent to the email address on this order."
+              : "Mail is not configured on this server, so the download stays here until email can be sent."}
+          </p>
+        </div>
+      ) : artifactUri ? (
         <div className="mt-6 space-y-3">
           <a
             className="inline-flex h-10 items-center justify-center rounded-md bg-[var(--accent)] px-4 text-sm font-medium text-white"
             href={orderId ? `/${locale}/api/store/download?order=${encodeURIComponent(orderId)}` : artifactUri}
-            target="_blank"
-            rel="noreferrer"
           >
             Download standard
           </a>
@@ -84,7 +176,7 @@ export default async function StoreReturnPage({
               : "Mail is not configured on this server, so the download link stays here until email can be sent."}
           </p>
         </div>
-      )}
+      ) : null}
       <p className="mt-8">
         <Link href={`/${locale}/store`} className="text-sm text-[var(--accent)] underline">
           Back to store

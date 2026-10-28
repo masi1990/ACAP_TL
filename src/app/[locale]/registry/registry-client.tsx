@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { RegistryProduct } from "@/lib/registry";
+import { t as tr, isLocale, type Locale } from "@/lib/i18n";
 
 type CountryGroup = {
   id: string;
@@ -184,23 +185,23 @@ export function RegistryClient({ locale }: { locale: string }) {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {MARK_TABS.map((t) => (
+        {MARK_TABS.map((tab) => (
           <button
-            key={t.id}
+            key={tab.id}
             type="button"
-            onClick={() => setParams({ mark: t.id === "ALL" ? null : t.id })}
+            onClick={() => setParams({ mark: tab.id === "ALL" ? null : tab.id })}
             className={cn(
               "rounded-md px-3 py-1.5 text-sm",
-              mark === t.id
+              mark === tab.id
                 ? "bg-[var(--ink)] text-[var(--bg)]"
                 : "border border-[var(--line)] bg-[var(--surface)] hover:bg-[var(--surface-2)]",
             )}
           >
-            {t.label}
-            {data?.counts && t.id === "ECO" ? ` (${data.counts.eco})` : ""}
-            {data?.counts && t.id === "QUALITY" ? ` (${data.counts.quality})` : ""}
-            {data?.counts && t.id === "BOTH" ? ` (${data.counts.both})` : ""}
-            {data?.counts && t.id === "ALL" ? ` (${data.total})` : ""}
+            {tr(isLocale(locale) ? locale : "en", tab.label)}
+            {data?.counts && tab.id === "ECO" ? ` (${data.counts.eco})` : ""}
+            {data?.counts && tab.id === "QUALITY" ? ` (${data.counts.quality})` : ""}
+            {data?.counts && tab.id === "BOTH" ? ` (${data.counts.both})` : ""}
+            {data?.counts && tab.id === "ALL" ? ` (${data.total})` : ""}
           </button>
         ))}
       </div>
@@ -236,12 +237,13 @@ export function RegistryClient({ locale }: { locale: string }) {
               <h3 className="text-sm font-semibold uppercase tracking-[0.14em] text-[var(--muted)]">
                 {c.countryName}
               </h3>
-              <ul className="grid gap-3 sm:grid-cols-2">
+              <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {c.products.map((p) => (
                   <li key={p.id} className="panel p-4">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div>
                         <p className="font-semibold text-[var(--ink)]">{p.productName}</p>
+                        {p.brand ? <p className="text-sm text-[var(--ink)]">{p.brand}</p> : null}
                         <p className="text-sm text-[var(--muted)]">{p.companyName}</p>
                       </div>
                       <Badge
@@ -261,10 +263,22 @@ export function RegistryClient({ locale }: { locale: string }) {
                       {p.marks.includes("ECO") && <Badge tone="ok">Eco Mark Africa</Badge>}
                     </div>
                     <dl className="mt-3 grid gap-1 text-xs text-[var(--muted)]">
-                      <div>
-                        <span className="font-medium text-[var(--ink)]">Standard: </span>
-                        {p.standard.editionLabel} — {p.standard.titleEn}
-                      </div>
+                      {(p.certificates?.length ? p.certificates : [{ markScheme: p.markScheme, certificateNo: p.certificateNo, status: p.status, issuedAt: p.issuedAt, expiresAt: p.expiresAt, standard: p.standard }]).map((certificate) => (
+                        <div key={certificate.certificateNo}>
+                          <span className="font-medium text-[var(--ink)]">
+                            {certificate.markScheme === "ECO" ? "Eco standard: " : "Quality standard: "}
+                          </span>
+                          {certificate.standard.editionLabel} — {certificate.standard.titleEn}
+                          <div>
+                            <span className="font-medium text-[var(--ink)]">Certificate: </span>
+                            <span className="font-mono">{certificate.certificateNo}</span>
+                            {" · "}
+                            {certificate.status}
+                            {" · "}
+                            {certificate.issuedAt.slice(0, 10)} → {certificate.expiresAt.slice(0, 10)}
+                          </div>
+                        </div>
+                      ))}
                       {p.tariff && (
                         <div>
                           <span className="font-medium text-[var(--ink)]">Tariff: </span>
@@ -273,15 +287,8 @@ export function RegistryClient({ locale }: { locale: string }) {
                         </div>
                       )}
                       <div>
-                        <span className="font-medium text-[var(--ink)]">Certificate: </span>
-                        <span className="font-mono">{p.certificateNo}</span>
-                      </div>
-                      <div>
                         <span className="font-medium text-[var(--ink)]">CB: </span>
                         {p.cbName}
-                      </div>
-                      <div>
-                        Valid {p.issuedAt.slice(0, 10)} → {p.expiresAt.slice(0, 10)}
                       </div>
                     </dl>
                     {p.pinCode && (

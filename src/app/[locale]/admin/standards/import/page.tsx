@@ -9,9 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { notifyCrud } from "@/components/ui/crud-notice";
+import { AUTHORITATIVE_LOCALES } from "@/lib/publication";
+import { LANGUAGE_FILE_FIELDS, STANDARD_KINDS } from "@/lib/standard-kinds";
 
 type Check = { id: string; label: string; required: boolean; present: boolean; notes?: string };
 type TariffOpt = { id: string; label: string };
+type CommitteeOpt = { id: string; label: string };
+type CountryOpt = { id: string; label: string };
 
 export default function StandardImportPage() {
   const params = useParams();
@@ -25,10 +29,36 @@ export default function StandardImportPage() {
   const [ics, setIcs] = useState("67.060");
   const [tariffOptions, setTariffOptions] = useState<TariffOpt[]>([]);
   const [selectedTariffs, setSelectedTariffs] = useState<string[]>([]);
+  const [committees, setCommittees] = useState<CommitteeOpt[]>([]);
+  const [countries, setCountries] = useState<CountryOpt[]>([]);
+  const [kind, setKind] = useState("PRODUCT");
+  const [technicalCommitteeId, setTechnicalCommitteeId] = useState("");
+  const [authoritativeLocale, setAuthoritativeLocale] = useState("en");
+  const [selectedCountries, setSelectedCountries] = useState<string[]>([]);
+  const [languageFiles, setLanguageFiles] = useState<Partial<Record<string, File>>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    void fetch("/api/admin/sectors")
+      .then((r) => r.json())
+      .then((data) => {
+        const sectors = (data.rows || []) as Array<{
+          code: string;
+          committees: Array<{ id: string; code: string; name: string }>;
+        }>;
+        setCommittees(
+          sectors.flatMap((sector) =>
+            sector.committees.map((committee) => ({
+              id: committee.id,
+              label: `${sector.code} · ${committee.code} — ${committee.name}`,
+            })),
+          ),
+        );
+        const states = (data.memberStates || []) as Array<{ id: string; iso2: string; name: string }>;
+        setCountries(states.map((state) => ({ id: state.id, label: `${state.name} (${state.iso2})` })));
+      })
+      .catch(() => undefined);
     void fetch("/api/admin/tariffs")
       .then((r) => r.json())
       .then((data) => {
@@ -59,6 +89,10 @@ export default function StandardImportPage() {
       setError("Choose a PDF or Word (.docx) file");
       return;
     }
+    if (commit && !technicalCommitteeId) {
+      setError("Choose a technical committee. Create a sector and committee first.");
+      return;
+    }
     setBusy(true);
     setError(null);
     setSavedId(null);
@@ -67,9 +101,17 @@ export default function StandardImportPage() {
     form.set("commit", commit ? "1" : "0");
     form.set("publishToStore", "0");
     form.set("ics", ics);
+    form.set("kind", kind);
+    form.set("authoritativeLocale", authoritativeLocale);
+    if (technicalCommitteeId) form.set("technicalCommitteeId", technicalCommitteeId);
     if (designation.trim()) form.set("designation", designation.trim());
     if (title.trim()) form.set("title", title.trim());
     if (selectedTariffs.length) form.set("tariffLineIds", JSON.stringify(selectedTariffs));
+    if (selectedCountries.length) form.set("memberStateIds", JSON.stringify(selectedCountries));
+    for (const item of LANGUAGE_FILE_FIELDS) {
+      const extra = languageFiles[item.field];
+      if (extra && item.locale !== authoritativeLocale) form.set(item.field, extra);
+    }
 
     const res = await fetch("/api/admin/standards/import", { method: "POST", body: form });
     const data = await res.json().catch(() => ({}));
@@ -88,6 +130,9 @@ export default function StandardImportPage() {
       setTitle("");
       setIcs("");
       setSelectedTariffs([]);
+      setSelectedCountries([]);
+      setLanguageFiles({});
+      setTechnicalCommitteeId("");
       notifyCrud("created", data.standard?.designation || "Standard imported");
       setPreview({
         packPreview: {
@@ -110,7 +155,7 @@ export default function StandardImportPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <div className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold">Import standard (PDF / Word)</h2>
         <p className="mt-2 text-sm text-[var(--muted)]">
@@ -159,6 +204,112 @@ export default function StandardImportPage() {
         <div className="grid gap-2">
           <Label htmlFor="title">Title override (optional)</Label>
           <Input id="title" value={title} onChange={(e) => setTitle(e.target.value)} />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-2">
+            <Label htmlFor="kind">Category</Label>
+            <select
+              id="kind"
+              value={kind}
+              onChange={(e) => setKind(e.target.value)}
+              className="h-10 w-full rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 text-sm"
+            >
+              {STANDARD_KINDS.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="locale">Authoritative language</Label>
+            <select
+              id="locale"
+              value={authoritativeLocale}
+              onChange={(e) => setAuthoritativeLocale(e.target.value)}
+              className="h-10 w-full rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 text-sm"
+            >
+              {AUTHORITATIVE_LOCALES.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="grid gap-2">
+          <Label htmlFor="committee">Technical committee</Label>
+          <select
+            id="committee"
+            value={technicalCommitteeId}
+            onChange={(e) => setTechnicalCommitteeId(e.target.value)}
+            className="h-10 w-full rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 text-sm"
+          >
+            <option value="">{committees.length === 0 ? "Create a sector and committee first" : "Select…"}</option>
+            {committees.map((committee) => (
+              <option key={committee.id} value={committee.id}>
+                {committee.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="grid gap-2">
+          <Label>Other language PDFs</Label>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {LANGUAGE_FILE_FIELDS.filter((item) => item.locale !== authoritativeLocale).map((item) => (
+              <div key={item.field} className="grid gap-1">
+                <Label htmlFor={item.field}>{item.label}</Label>
+                <Input
+                  key={`${item.field}-${fileKey}`}
+                  id={item.field}
+                  type="file"
+                  accept=".pdf,application/pdf"
+                  onChange={(e) => {
+                    const next = e.target.files?.[0];
+                    setLanguageFiles((prev) => {
+                      const copy = { ...prev };
+                      if (next) copy[item.field] = next;
+                      else delete copy[item.field];
+                      return copy;
+                    });
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-[var(--muted)]">
+            The source document is the authoritative language. Add PDFs for the other languages buyers can preview and purchase.
+          </p>
+        </div>
+        <div className="grid gap-2">
+          <Label>Adopting countries</Label>
+          <div className="max-h-40 space-y-1 overflow-y-auto rounded-md border border-[var(--line)] bg-[var(--surface)] p-2">
+            {countries.length === 0 && (
+              <p className="px-2 py-2 text-sm text-[var(--muted)]">No member states loaded.</p>
+            )}
+            {countries.map((country) => {
+              const checked = selectedCountries.includes(country.id);
+              return (
+                <label
+                  key={country.id}
+                  className="flex cursor-pointer items-start gap-2 rounded px-2 py-1.5 text-sm hover:bg-[var(--surface-2)]"
+                >
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={checked}
+                    onChange={() =>
+                      setSelectedCountries((prev) =>
+                        checked ? prev.filter((id) => id !== country.id) : [...prev, country.id],
+                      )
+                    }
+                  />
+                  <span className="leading-snug">{country.label}</span>
+                </label>
+              );
+            })}
+          </div>
+          <p className="text-xs text-[var(--muted)]">{selectedCountries.length} adopting country(ies) selected</p>
         </div>
         <p className="text-sm text-[var(--muted)]">
           The webstore price is set afterwards on the Price table tab. This upload does not assign a price.

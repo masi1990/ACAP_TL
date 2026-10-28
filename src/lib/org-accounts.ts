@@ -34,6 +34,46 @@ export async function replaceOrgRole(input: {
   });
 }
 
+/**
+ * Add an organisation role without removing the roles this person already holds.
+ * A new member is stored under the granted role. An existing member keeps their membership role.
+ */
+export async function grantOrgRole(input: {
+  userId: string;
+  organizationId: string;
+  roleCode: string;
+  grantedById: string;
+}) {
+  const membership = await prisma.organizationMembership.findUnique({
+    where: { organizationId_userId: { organizationId: input.organizationId, userId: input.userId } },
+  });
+  if (!membership) {
+    await prisma.organizationMembership.create({
+      data: {
+        organizationId: input.organizationId,
+        userId: input.userId,
+        role: input.roleCode,
+      },
+    });
+  }
+  const existing = await prisma.userRoleAssignment.findFirst({
+    where: {
+      userId: input.userId,
+      roleCode: input.roleCode,
+      organizationId: input.organizationId,
+    },
+  });
+  if (existing) return existing;
+  return prisma.userRoleAssignment.create({
+    data: {
+      userId: input.userId,
+      roleCode: input.roleCode,
+      organizationId: input.organizationId,
+      grantedById: input.grantedById,
+    },
+  });
+}
+
 /** Add a hub role. The person's organisation membership is left as it is. */
 export async function grantGlobalRole(input: { userId: string; roleCode: string; grantedById: string }) {
   const existing = await prisma.userRoleAssignment.findFirst({

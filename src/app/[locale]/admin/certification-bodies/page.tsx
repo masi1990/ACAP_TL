@@ -1,5 +1,6 @@
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { isLocale } from "@/lib/i18n";
+import { ClientRedirect } from "@/components/admin/client-redirect";
 
 export default async function CertificationBodiesPage({
   params,
@@ -8,5 +9,5 @@ export default async function CertificationBodiesPage({
 }) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
-  redirect(`/${locale}/admin/institutions`);
+  return <ClientRedirect href={`/${locale}/admin/institutions`} />;
 }

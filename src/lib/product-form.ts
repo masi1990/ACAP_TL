@@ -8,6 +8,7 @@ export function productFormFields(input: {
   tariffs: { value: string; label: string }[];
   countries: { value: string; label: string }[];
   marks?: { value: string; label: string }[];
+  bodies?: { value: string; label: string }[];
   lockStandard?: boolean;
   certificateStatuses?: { value: string; label: string }[];
   defaults?: {
@@ -17,7 +18,11 @@ export function productFormFields(input: {
     standardVersionId?: string;
     tariffLineId?: string;
     markScheme?: string;
+    markCoverage?: string;
+    ecoStandardVersionId?: string;
+    ecoCertificateStatus?: string;
     certificateStatus?: string;
+    certifyingCbId?: string;
     origin?: OriginClaim | null;
   };
 }): Field[] {
@@ -46,40 +51,83 @@ export function productFormFields(input: {
     input.lockStandard
       ? {
           name: "standardVersionId",
-          label: "Standard",
+          label: "Quality standard",
           hidden: true,
           defaultValue: input.defaults?.standardVersionId,
         }
       : {
           name: "standardVersionId",
-          label: "Standard",
+          label: "Quality standard",
           type: "select",
           required: true,
           options: input.versions,
           defaultValue: input.defaults?.standardVersionId,
+          help: "The standard the Quality Mark is certified against.",
         },
+    ...(input.marks
+      ? [
+          {
+            name: "markCoverage",
+            label: "Marks",
+            type: "select" as const,
+            required: true,
+            options: input.marks,
+            defaultValue: input.defaults?.markCoverage || (input.defaults?.markScheme === "ECO" ? "BOTH" : "QUALITY"),
+            help: "Eco Mark Africa is certified with the Quality Mark, against its own standard.",
+          },
+          input.lockStandard
+            ? {
+                name: "ecoStandardVersionId",
+                label: "Eco standard",
+                hidden: true,
+                defaultValue: input.defaults?.ecoStandardVersionId,
+              }
+            : {
+                name: "ecoStandardVersionId",
+                label: "Eco standard",
+                type: "select" as const,
+                required: true,
+                options: input.versions,
+                defaultValue: input.defaults?.ecoStandardVersionId,
+                showWhen: { field: "markCoverage", equals: "BOTH" },
+                help: "Usually a different standard from the Quality Mark. The same standard can still be chosen.",
+              },
+        ]
+      : []),
     ...(input.certificateStatuses
       ? [
           {
             name: "certificateStatus",
-            label: "Certificate status",
+            label: "Quality certificate status",
             type: "select" as const,
             required: true,
             options: input.certificateStatuses,
             defaultValue: input.defaults?.certificateStatus || "certified",
           },
+          ...(input.defaults?.markCoverage === "BOTH" || input.defaults?.ecoStandardVersionId
+            ? [
+                {
+                  name: "ecoCertificateStatus",
+                  label: "Eco certificate status",
+                  type: "select" as const,
+                  required: true,
+                  options: input.certificateStatuses,
+                  defaultValue: input.defaults?.ecoCertificateStatus || "certified",
+                },
+              ]
+            : []),
         ]
       : []),
-    ...(input.marks
+    ...(input.bodies
       ? [
           {
-            name: "markScheme",
-            label: "Mark",
+            name: "certifyingCbId",
+            label: "Certification body",
             type: "select" as const,
             required: true,
-            options: input.marks,
-            defaultValue: input.defaults?.markScheme || "QUALITY",
-            help: "Eco Mark Africa is available only when the certification body is also licensed for the Quality Mark.",
+            options: input.bodies,
+            defaultValue: input.defaults?.certifyingCbId,
+            help: "The body that certifies this product. Another product can use a different body.",
           },
         ]
       : []),

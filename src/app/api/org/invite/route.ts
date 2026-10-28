@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { appendAuditEvent } from "@/lib/audit";
 import { notifyAfterCommit, queueOrgInvite } from "@/lib/notifications";
-import { assignableOrgRoles, canAssignAcrossOrganisations, isAuthorityType } from "@/lib/rbac";
+import { assignableOrgRoles, canAssignAcrossOrganisations, managesSameAuthorityType } from "@/lib/rbac";
 
 export async function POST(req: NextRequest) {
   const session = await getSessionUser();
@@ -21,19 +21,10 @@ export async function POST(req: NextRequest) {
   const ownsRequested = session.user.memberships.some(
     (item) => item.role === "PRIMARY_ADMIN" && item.organization.id === requestedOrg,
   );
-  const ownsCountry =
-    !!requested &&
-    isAuthorityType(requested.type) &&
-    !!requested.memberStateId &&
-    session.user.memberships.some(
-      (item) =>
-        item.role === "PRIMARY_ADMIN" &&
-        isAuthorityType(item.organization.type) &&
-        item.organization.memberStateId === requested.memberStateId,
-    );
+  const ownsType = !!requested && managesSameAuthorityType(session.user, requested);
   const ownMembership = session.user.memberships.find((item) => item.role === "PRIMARY_ADMIN");
-  const organizationId = arso && requestedOrg ? requestedOrg : ownsRequested || ownsCountry ? requestedOrg : ownMembership?.organization.id || "";
-  if (!organizationId || (!arso && requestedOrg && !ownsRequested && !ownsCountry)) {
+  const organizationId = arso && requestedOrg ? requestedOrg : ownsRequested || ownsType ? requestedOrg : ownMembership?.organization.id || "";
+  if (!organizationId || (!arso && requestedOrg && !ownsRequested && !ownsType)) {
     return NextResponse.json({ error: "Only the main account can invite people into this organisation" }, { status: 403 });
   }
 

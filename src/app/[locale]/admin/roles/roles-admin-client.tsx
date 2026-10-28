@@ -7,6 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { notifyCrud } from "@/components/ui/crud-notice";
+import { LinePager } from "@/components/line-pager";
+import { listPage } from "@/lib/list-page";
+import { formatStamp } from "@/lib/utils";
 import type { Permission } from "@/lib/rbac";
 
 type RoleRow = {
@@ -115,6 +118,8 @@ export function RolesAdminClient({
   const router = useRouter();
   const [roles, setRoles] = useState(initialRoles);
   const [assignments, setAssignments] = useState(initialAssignments);
+  const [assignmentPage, setAssignmentPage] = useState(1);
+  const [userPage, setUserPage] = useState(1);
 
   useEffect(() => {
     setRoles(initialRoles);
@@ -135,6 +140,8 @@ export function RolesAdminClient({
     () => (selected ? new Set(parsePerms(selected.permissionsJson)) : new Set<string>()),
     [selected],
   );
+  const assignmentView = listPage(String(assignmentPage), assignments.length);
+  const userView = listPage(String(userPage), users.length);
 
   // Create custom role
   const [newCode, setNewCode] = useState("");
@@ -526,7 +533,7 @@ export function RolesAdminClient({
                 </td>
               </tr>
             )}
-            {assignments.map((a) => (
+            {assignments.slice(assignmentView.skip, assignmentView.skip + assignmentView.take).map((a) => (
               <tr key={a.id} className="border-b border-[var(--line)]/50">
                 <td className="px-4 py-2">
                   <div>{a.user.name}</div>
@@ -538,7 +545,7 @@ export function RolesAdminClient({
                     ? organizations.find((org) => org.id === a.organizationId)?.name || a.organizationId
                     : "—"}
                 </td>
-                <td className="px-4 py-2 text-xs">{new Date(a.grantedAt).toLocaleString()}</td>
+                <td className="px-4 py-2 text-xs">{formatStamp(a.grantedAt)}</td>
                 <td className="px-4 py-2 text-right">
                   {canAssign && (
                     <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => revoke(a.id)}>
@@ -550,6 +557,9 @@ export function RolesAdminClient({
             ))}
           </tbody>
         </table>
+        <div className="border-t border-[var(--line)] px-4 py-3">
+          <LinePager page={assignmentView.page} pageCount={assignmentView.pageCount} onPage={setAssignmentPage} />
+        </div>
       </section>
 
       <section className="panel overflow-x-auto">
@@ -565,7 +575,7 @@ export function RolesAdminClient({
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => (
+            {users.slice(userView.skip, userView.skip + userView.take).map((u) => (
               <tr key={u.id} className="border-b border-[var(--line)]/50 align-top">
                 <td className="px-4 py-2">
                   <div>{u.name}</div>
@@ -585,6 +595,9 @@ export function RolesAdminClient({
             ))}
           </tbody>
         </table>
+        <div className="border-t border-[var(--line)] px-4 py-3">
+          <LinePager page={userView.page} pageCount={userView.pageCount} onPage={setUserPage} />
+        </div>
       </section>
     </div>
   );

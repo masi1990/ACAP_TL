@@ -6,7 +6,7 @@ export function VerifyForm({ locale, initialPin }: { locale: Locale; initialPin:
     <form
       method="get"
       action={`/${locale}/verify`}
-      className="panel rise-delay-2 mt-8 grid gap-3 p-5 sm:grid-cols-[1fr_auto] sm:items-end"
+      className="panel rise-delay-2 mt-8 grid max-w-[32rem] gap-3 p-5 sm:grid-cols-[1fr_auto] sm:items-end"
     >
       <div className="grid gap-2">
         <label htmlFor="pin" className="text-sm font-medium text-[var(--ink)]">

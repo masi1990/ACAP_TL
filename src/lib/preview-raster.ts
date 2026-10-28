@@ -2,6 +2,7 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import { access, readFile, mkdir } from "fs/promises";
 import path from "path";
+import { resolvePython } from "@/lib/python-bin";
 import type { PdfPreviewPage, PreviewTocEntry } from "@/lib/standard-preview-types";
 
 const execFileAsync = promisify(execFile);
@@ -42,19 +43,21 @@ export function publicUriToFs(uri: string): string | null {
 export async function ensureStandardPreviewRasters(opts: {
   standardVersionId: string;
   sourcePdfUri: string | null | undefined;
+  rasterKey?: string;
 }): Promise<{ baseUrl: string; manifest: Manifest } | null> {
   if (!opts.sourcePdfUri) return null;
   const pdfFs = publicUriToFs(opts.sourcePdfUri);
   if (!pdfFs || !(await exists(pdfFs))) return null;
 
-  const outRel = path.join("uploads", "standards", "preview", opts.standardVersionId);
+  const folder = (opts.rasterKey || opts.standardVersionId).replace(/[^a-zA-Z0-9_-]/g, "");
+  const outRel = path.join("uploads", "standards", "preview", folder);
   const outDir = path.join(process.cwd(), "public", outRel);
   const manifestPath = path.join(outDir, "manifest.json");
 
   if (!(await exists(manifestPath))) {
     await mkdir(outDir, { recursive: true });
     const script = path.join(process.cwd(), "scripts", "generate-standard-preview.py");
-    await execFileAsync("python3", [script, pdfFs, outDir], {
+    await execFileAsync(await resolvePython(), [script, pdfFs, outDir], {
       maxBuffer: 32 * 1024 * 1024,
       timeout: 120_000,
     });
@@ -72,12 +75,14 @@ export async function ensureStandardPreviewRasters(opts: {
 export async function ensureStandardFullRasters(opts: {
   standardVersionId: string;
   sourcePdfUri: string | null | undefined;
+  rasterKey?: string;
 }): Promise<{ baseUrl: string; manifest: Manifest } | null> {
   if (!opts.sourcePdfUri) return null;
   const pdfFs = publicUriToFs(opts.sourcePdfUri);
   if (!pdfFs || !(await exists(pdfFs))) return null;
 
-  const outRel = path.join("uploads", "standards", "full", opts.standardVersionId);
+  const folder = (opts.rasterKey || opts.standardVersionId).replace(/[^a-zA-Z0-9_-]/g, "");
+  const outRel = path.join("uploads", "standards", "full", folder);
   const outDir = path.join(process.cwd(), "public", outRel);
   const manifestPath = path.join(outDir, "manifest.json");
 
@@ -94,7 +99,7 @@ export async function ensureStandardFullRasters(opts: {
   if (needsRebuild) {
     await mkdir(outDir, { recursive: true });
     const script = path.join(process.cwd(), "scripts", "generate-standard-preview.py");
-    await execFileAsync("python3", [script, pdfFs, outDir, "--full"], {
+    await execFileAsync(await resolvePython(), [script, pdfFs, outDir, "--full"], {
       maxBuffer: 32 * 1024 * 1024,
       timeout: 120_000,
     });

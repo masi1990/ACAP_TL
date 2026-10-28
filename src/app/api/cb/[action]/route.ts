@@ -5,14 +5,17 @@ import { randomBytes } from "crypto";
 import { prisma } from "@/lib/db";
 import { appendAuditEvent } from "@/lib/audit";
 import { issueCertificateOfConformity } from "@/lib/coc";
-import { can } from "@/lib/rbac";
+import { hasGlobalPermission, userServesCertificationBody } from "@/lib/rbac";
 import { requirePermission, type AuthedSession } from "@/lib/require-auth";
 import { annexTitle, INTERNAL_CERTIFICATE_KIND, isAnnexCode } from "@/lib/dossier";
 import { removeDossierFile, storeDossierFile } from "@/lib/dossier-files";
 import { isCountryCode } from "@/lib/countries";
 import { originClaimFromBody } from "@/lib/origin-claim";
-import { createTradeProduct, materializeStandardItems, resolveTariffLineId } from "@/lib/product-record";
-import { requestedClientMark } from "@/lib/cb-licenses";
+import { createTradeProduct, ecoTrackFromBody, materializeStandardItems, resolveCertifyingCb, resolveTariffLineId, assertApplicationAcceptsWork, ProductRecordError } from "@/lib/product-record";
+import { hashPassword } from "@/lib/auth";
+import { replaceOrgRole } from "@/lib/org-accounts";
+import { issuePasswordReset } from "@/lib/password-reset";
+import { notifyAfterCommit } from "@/lib/notifications";
 
 type Ctx = { params: Promise<{ action: string }> };
 
@@ -21,9 +24,14 @@ function fail(message: string, status = 400) {
 }
 
 function actingCbId(session: AuthedSession, requested?: string) {
-  const own = session.user.memberships.find((m) => m.organization.type === "CB")?.organization.id;
-  if (own && !can(session.user, "cb:write")) return own;
-  return String(requested || own || "");
+  const ids = session.user.memberships
+    .filter((membership) => membership.organization.type === "CB")
+    .map((membership) => membership.organization.id);
+  if (hasGlobalPermission(session.user, "cb:write")) return String(requested || ids[0] || "");
+  const asked = String(requested || "");
+  if (ids.length === 1) return ids[0];
+  if (asked && ids.includes(asked)) return asked;
+  return "";
 }
 
 export async function POST(req: NextRequest, ctx: Ctx) {
@@ -31,7 +39,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (action === "evidence") return uploadEvidence(req);
 
   const permission = action === "clients" ? "clients:write" : "certify:operate";
-  if (!["clients", "products", "assessment", "certificate"].includes(action)) {
+  if (!["clients", "products", "assessment", "certificate", "decision"].includes(action)) {
     return fail("Unknown action", 404);
   }
   const auth = await requirePermission(permission);
@@ -43,18 +51,99 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     if (action === "clients") return await addClient(session, body);
     if (action === "products") return await addProduct(session, body);
     if (action === "assessment") return await saveAssessment(session, body);
+    if (action === "decision") return await decideSubmission(session, body);
     return await issue(session, body);
   } catch (err) {
     return fail(err instanceof Error ? err.message : "Request failed");
   }
 }
 
+async function decideSubmission(session: AuthedSession, body: Record<string, unknown>) {
+  const kind = String(body.kind || "");
+  const id = String(body.id || "").trim();
+  const decision = String(body.decision || "");
+  if (!id || (decision !== "accept" && decision !== "reject")) {
+    return fail("Choose accept or reject");
+  }
+  if (kind === "client") return decideClient(session, id, decision);
+  if (kind === "product") return decideProduct(session, id, decision);
+  return fail("Choose a company or a product");
+}
+
+async function decideClient(session: AuthedSession, id: string, decision: "accept" | "reject") {
+  const organization = await prisma.organization.findUnique({ where: { id } });
+  if (!organization || (organization.type !== "MANUFACTURER" && organization.type !== "IMPORTER")) {
+    return fail("Manufacturer or importer not found", 404);
+  }
+  if (!organization.servicingCbId || !userServesCertificationBody(session.user, organization.servicingCbId)) {
+    return fail("You can only decide clients of your certification body", 403);
+  }
+  if (organization.status !== "PENDING") return fail("This company is not waiting for acceptance");
+
+  if (decision === "accept") {
+    await prisma.organization.update({ where: { id }, data: { status: "ACTIVE" } });
+  } else {
+    await prisma.$transaction(async (tx) => {
+      await tx.organization.update({ where: { id }, data: { status: "REJECTED" } });
+      await tx.certificationApplication.updateMany({
+        where: {
+          status: "PENDING_APPROVAL",
+          product: { company: { clientAccount: { organizationId: id } } },
+        },
+        data: { status: "REJECTED" },
+      });
+    });
+  }
+
+  await appendAuditEvent({
+    actorUserId: session.userId,
+    action: decision === "accept" ? "CB_CLIENT_ACCEPT" : "CB_CLIENT_REJECT",
+    entityType: "Organization",
+    entityId: id,
+    organizationId: organization.servicingCbId,
+    after: { status: decision === "accept" ? "ACTIVE" : "REJECTED" },
+  });
+  return NextResponse.json({ ok: true });
+}
+
+async function decideProduct(session: AuthedSession, id: string, decision: "accept" | "reject") {
+  const application = await prisma.certificationApplication.findUnique({
+    where: { id },
+    include: { product: { include: { company: { include: { clientAccount: { include: { organization: true } } } } } } },
+  });
+  if (!application) return fail("Product not found", 404);
+  if (!userServesCertificationBody(session.user, application.organizationId)) {
+    return fail("You can only decide products of your certification body", 403);
+  }
+  if (application.status !== "PENDING_APPROVAL") return fail("This product is not waiting for acceptance");
+  const owner = application.product.company.clientAccount.organization;
+  if (decision === "accept" && owner.status !== "ACTIVE") {
+    return fail("Accept the company before accepting the product");
+  }
+
+  await prisma.certificationApplication.updateMany({
+    where: { productId: application.productId, status: "PENDING_APPROVAL" },
+    data: { status: decision === "accept" ? "EVALUATION" : "REJECTED" },
+  });
+  await appendAuditEvent({
+    actorUserId: session.userId,
+    action: decision === "accept" ? "CB_PRODUCT_ACCEPT" : "CB_PRODUCT_REJECT",
+    entityType: "CertificationApplication",
+    entityId: id,
+    organizationId: application.organizationId,
+    after: { status: decision === "accept" ? "EVALUATION" : "REJECTED" },
+  });
+  return NextResponse.json({ ok: true });
+}
+
 async function addClient(session: AuthedSession, body: Record<string, unknown>) {
   const name = String(body.name || "").trim();
   const type = String(body.type || "MANUFACTURER").toUpperCase();
   const countryIso2 = String(body.countryIso2 || "").trim().toUpperCase();
+  const email = String(body.email || "").toLowerCase().trim();
   const cbId = actingCbId(session, String(body.cbOrganizationId || ""));
   if (!name) return fail("Client name is required");
+  if (!email.includes("@")) return fail("Account email is required");
   if (type !== "MANUFACTURER" && type !== "IMPORTER") {
     return fail("Client must be a manufacturer or an importer");
   }
@@ -63,7 +152,7 @@ async function addClient(session: AuthedSession, body: Record<string, unknown>) 
   if (!cb || cb.type !== "CB") return fail("Choose the certification body that serves this client");
 
   const org = await prisma.organization.create({
-    data: { name, type, servicingCbId: cb.id },
+    data: { name, type, servicingCbId: cb.id, status: "ACTIVE" },
   });
   const account = await prisma.clientAccount.create({
     data: { organizationId: org.id, displayName: name },
@@ -72,15 +161,56 @@ async function addClient(session: AuthedSession, body: Record<string, unknown>) 
     data: { clientAccountId: account.id, legalName: name, countryIso2 },
   });
 
+  const existing = await prisma.userAccount.findUnique({ where: { email } });
+  let setPasswordUrl = "";
+  if (existing) {
+    await replaceOrgRole({
+      userId: existing.id,
+      organizationId: org.id,
+      roleCode: "PRIMARY_ADMIN",
+      grantedById: session.userId,
+    });
+  } else {
+    const user = await prisma.userAccount.create({
+      data: {
+        email,
+        name,
+        passwordHash: await hashPassword(randomBytes(24).toString("hex")),
+        mustChangePassword: true,
+      },
+    });
+    await replaceOrgRole({
+      userId: user.id,
+      organizationId: org.id,
+      roleCode: "PRIMARY_ADMIN",
+      grantedById: session.userId,
+    });
+    const issued = await issuePasswordReset(user);
+    setPasswordUrl = issued.url;
+    await notifyAfterCommit();
+  }
+
   await appendAuditEvent({
     actorUserId: session.userId,
     action: "CB_CLIENT_CREATE",
     entityType: "Organization",
     entityId: org.id,
     organizationId: cb.id,
-    after: { name, type },
+    after: { name, type, email },
   });
-  return NextResponse.json({ ok: true, id: org.id }, { status: 201 });
+  return NextResponse.json(
+    {
+      ok: true,
+      id: org.id,
+      ...(setPasswordUrl
+        ? {
+            setPasswordUrl,
+            message: "Client created. They must set a password from this link before they can sign in.",
+          }
+        : { message: "Client created and linked to the existing account." }),
+    },
+    { status: 201 },
+  );
 }
 
 async function addProduct(session: AuthedSession, body: Record<string, unknown>) {
@@ -104,6 +234,10 @@ async function addProduct(session: AuthedSession, body: Record<string, unknown>)
     return fail("This client belongs to another certification body");
   }
 
+  if (client.status !== "ACTIVE") {
+    return fail("Accept this company before adding a product for it");
+  }
+
   const version = await prisma.standardVersion.findUnique({ where: { id: standardVersionId } });
   if (!version) return fail("Standard not found");
 
@@ -111,12 +245,8 @@ async function addProduct(session: AuthedSession, body: Record<string, unknown>)
   if (!company) return fail("This client has no company record");
 
   const claim = originClaimFromBody(body, { importer: client.type === "IMPORTER" });
-  let markScheme: "QUALITY" | "ECO" = "QUALITY";
-  try {
-    markScheme = requestedClientMark(body.markScheme);
-  } catch (err) {
-    return fail(err instanceof Error ? err.message : "Choose a mark");
-  }
+  const marks = await ecoTrackFromBody(body);
+  const certifyingCbId = await resolveCertifyingCb(body.certifyingCbId, cbId);
   const product = await createTradeProduct({
     companyId: company.id,
     name,
@@ -125,8 +255,11 @@ async function addProduct(session: AuthedSession, body: Record<string, unknown>)
     machineDocJson: version.machineDocJson,
     originClaimJson: JSON.stringify(claim),
     tariffLineId: await resolveTariffLineId(standardVersionId, body.tariffLineId),
-    servicingCbId: cbId,
-    markScheme,
+    servicingCbId: certifyingCbId,
+    coverage: marks.coverage,
+    ecoStandardVersionId: marks.ecoStandardVersionId,
+    ecoMachineDocJson: marks.ecoMachineDocJson,
+    applicationStatus: "EVALUATION",
   });
 
   await appendAuditEvent({
@@ -147,9 +280,13 @@ async function saveAssessment(session: AuthedSession, body: Record<string, unkno
   if (!applicationId) return fail("Application is required");
   const application = await prisma.certificationApplication.findUnique({ where: { id: applicationId } });
   if (!application) return fail("Application not found");
-  const cbId = actingCbId(session, application.organizationId);
-  if (application.organizationId !== cbId && !can(session.user, "cb:write")) {
+  if (!userServesCertificationBody(session.user, application.organizationId)) {
     return fail("You can only record results for your certification body");
+  }
+  try {
+    assertApplicationAcceptsWork(application.status);
+  } catch (err) {
+    return fail(err instanceof ProductRecordError ? err.message : "This product is not in certification");
   }
 
   if (mode === "dossier") return saveDossier(session, application, body);
@@ -184,7 +321,12 @@ async function saveAssessment(session: AuthedSession, body: Record<string, unkno
         text,
         countryIso2: source === "NATIONAL" ? countryIso2 : null,
         sortOrder: 1000 + count,
+        recordedById: session.userId,
       },
+    });
+    await prisma.certificationApplication.update({
+      where: { id: applicationId },
+      data: { recordedById: session.userId },
     });
     return NextResponse.json({ ok: true }, { status: 201 });
   }
@@ -203,9 +345,14 @@ async function saveAssessment(session: AuthedSession, body: Record<string, unkno
         unit: String(row.unit || ""),
         notes: String(row.notes || ""),
         testMethod: String(row.testMethod || ""),
+        recordedById: session.userId,
       },
     });
   }
+  await prisma.certificationApplication.update({
+    where: { id: applicationId },
+    data: { recordedById: session.userId },
+  });
   return NextResponse.json({ ok: true });
 }
 
@@ -246,6 +393,10 @@ async function saveDossier(
     create: { applicationId: application.id, ...data },
     update: data,
   });
+  await prisma.certificationApplication.update({
+    where: { id: application.id },
+    data: { recordedById: session.userId },
+  });
   await appendAuditEvent({
     actorUserId: session.userId,
     action: "TEST_DOSSIER_SAVE",
@@ -262,9 +413,13 @@ async function issue(session: AuthedSession, body: Record<string, unknown>) {
   if (!applicationId) return fail("Application is required");
   const application = await prisma.certificationApplication.findUnique({ where: { id: applicationId } });
   if (!application) return fail("Application not found");
-  const cbId = actingCbId(session, application.organizationId);
-  if (application.organizationId !== cbId && !can(session.user, "cb:write")) {
+  if (!userServesCertificationBody(session.user, application.organizationId)) {
     return fail("You can only issue a certificate for your certification body");
+  }
+  try {
+    assertApplicationAcceptsWork(application.status);
+  } catch (err) {
+    return fail(err instanceof ProductRecordError ? err.message : "This product is not in certification");
   }
   try {
     const result = await issueCertificateOfConformity({ applicationId, actorUserId: session.userId });
@@ -275,8 +430,7 @@ async function issue(session: AuthedSession, body: Record<string, unknown>) {
 }
 
 function ownsApplication(session: AuthedSession, organizationId: string) {
-  const cbId = actingCbId(session, organizationId);
-  return organizationId === cbId || can(session.user, "cb:write");
+  return userServesCertificationBody(session.user, organizationId);
 }
 
 async function uploadEvidence(req: NextRequest) {
@@ -311,6 +465,11 @@ async function attachLaboratoryFile(session: AuthedSession, itemId: string, file
   if (!ownsApplication(session, item.application.organizationId)) {
     return fail("You can only attach evidence for your certification body");
   }
+  try {
+    assertApplicationAcceptsWork(item.application.status);
+  } catch (err) {
+    return fail(err instanceof ProductRecordError ? err.message : "This product is not in certification");
+  }
 
   const safeName = file.name.replace(/[^\w.\-]+/g, "_").slice(0, 80) || "result";
   const stored = `${item.id}-${randomBytes(4).toString("hex")}-${safeName}`;
@@ -325,6 +484,14 @@ async function attachLaboratoryFile(session: AuthedSession, itemId: string, file
       contentType: file.type || "application/octet-stream",
       storageUri: `/uploads/lab/${stored}`,
     },
+  });
+  await prisma.assessmentItem.update({
+    where: { id: item.id },
+    data: { recordedById: session.userId },
+  });
+  await prisma.certificationApplication.update({
+    where: { id: item.application.id },
+    data: { recordedById: session.userId },
   });
   await appendAuditEvent({
     actorUserId: session.userId,
@@ -345,6 +512,13 @@ async function loadOwnedApplication(session: AuthedSession, applicationId: strin
   if (!application) return { error: fail("Application not found") };
   if (!ownsApplication(session, application.organizationId)) {
     return { error: fail("You can only attach files for your certification body") };
+  }
+  try {
+    assertApplicationAcceptsWork(application.status);
+  } catch (err) {
+    return {
+      error: fail(err instanceof ProductRecordError ? err.message : "This product is not in certification"),
+    };
   }
   return { application };
 }

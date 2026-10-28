@@ -1,27 +1,36 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { isLocale, type Locale } from "@/lib/i18n";
+import { isLocale, t, type Locale } from "@/lib/i18n";
 import { CrudForm } from "@/components/admin/crud-form";
-import { FlowNav } from "@/components/flow-nav";
+import { LinePager } from "@/components/line-pager";
+import { listHref, listPage } from "@/lib/list-page";
 
-export default async function ConsumersPage({ params }: { params: Promise<{ locale: string }> }) {
+export default async function ConsumersPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ locale: string }>;
+  searchParams: Promise<{ page?: string }>;
+}) {
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
   const locale = raw as Locale;
+  const total = await prisma.consumerComplaint.count();
+  const listing = listPage((await searchParams).page, total);
 
   const complaints = await prisma.consumerComplaint.findMany({
     orderBy: { createdAt: "desc" },
-    take: 20,
+    skip: listing.skip,
+    take: listing.take,
     select: { id: true, subject: true, status: true, createdAt: true },
   });
 
   return (
-    <div className="mx-auto max-w-3xl space-y-8 px-4 py-10">
+    <div className="shell space-y-8 py-10">
       <div>
-        <p className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">Consumers</p>
-        <h1 className="mt-2 font-[family-name:var(--font-display)] text-3xl sm:text-4xl">Report a product</h1>
-        <FlowNav locale={locale} current="consumers" />
+        <p className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">{t(locale, "Consumers")}</p>
+        <h1 className="mt-2 font-[family-name:var(--font-display)] text-3xl sm:text-4xl">{t(locale, "Report a product")}</h1>
         <p className="mt-2 text-sm text-[var(--muted)]">
           If a product carries a PIN, include it so the complaint reaches the certification body that
           issued the certificate. You can also check a PIN on the{" "}
@@ -69,6 +78,12 @@ export default async function ConsumersPage({ params }: { params: Promise<{ loca
           </tbody>
         </table>
       </div>
+      <LinePager
+        page={listing.page}
+        pageCount={listing.pageCount}
+        prevHref={listHref(`/${locale}/consumers`, listing.page - 1)}
+        nextHref={listHref(`/${locale}/consumers`, listing.page + 1)}
+      />
     </div>
   );
 }

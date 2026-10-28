@@ -59,9 +59,9 @@ export function SurveillanceClient({ locale }: { locale: string }) {
   }
 
   return (
-    <div className="panel mt-8 space-y-3 p-5">
+    <div className="panel mt-8 max-w-2xl space-y-3 p-5">
       <h2 className="font-semibold">File complaint / open case ({locale})</h2>
-      <div className="grid gap-2 sm:grid-cols-2">
+      <div className="grid gap-2">
         <Input value={pin} onChange={(e) => setPin(e.target.value)} placeholder="PIN code (optional)" />
         <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Your email" />
         <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" />

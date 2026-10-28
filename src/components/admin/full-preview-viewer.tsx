@@ -10,9 +10,14 @@ import type { AdminFullStandardPreview } from "@/lib/admin-standard-preview";
 export function FullPreviewViewer({
   data,
   closeHref,
+  viewOnly = false,
+  showBack = true,
 }: {
   data: AdminFullStandardPreview;
   closeHref: string;
+  /** Page images only. No download control. */
+  viewOnly?: boolean;
+  showBack?: boolean;
 }) {
   const pdfPages = data.pdfPages ?? [];
   const usePdf = pdfPages.length > 0;
@@ -33,7 +38,9 @@ export function FullPreviewViewer({
           Full standard · {data.editionLabel}
         </p>
         <p className="text-xs text-[var(--muted)]">
-          Authenticated preview — all clauses readable (not the public Clause-1 view).
+          {viewOnly
+            ? "View only. This standard stays on screen and cannot be downloaded."
+            : "Authenticated preview — all clauses readable (not the public Clause-1 view)."}
         </p>
 
         {data.tariffMaps.length > 0 && (
@@ -118,25 +125,29 @@ export function FullPreviewViewer({
 
       <div className="flex min-h-0 flex-1 flex-col bg-[#3d4449] p-3 sm:p-5">
         <div className="mx-auto flex w-full max-w-[720px] flex-1 flex-col">
-          <div className="relative min-h-0 flex-1 overflow-y-auto rounded-[2px] bg-[#2a2d30] shadow-lg">
+          <div
+            className="relative min-h-0 flex-1 overflow-y-auto rounded-[2px] bg-[#2a2d30] shadow-lg"
+            onContextMenu={viewOnly ? (event) => event.preventDefault() : undefined}
+          >
             {usePdf && page ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={page.imageUrl}
                 alt={`${data.editionLabel} — ${page.label}`}
+                draggable={false}
                 className="mx-auto block h-auto w-full max-w-[640px] bg-white"
               />
             ) : htmlPage ? (
               <div className="min-h-[480px] bg-[#f7f4ee] px-8 py-10 text-[#1a1a1a]">
                 {htmlPage.kind === "cover" && (
                   <div className="space-y-4 text-center">
-                    <p className="text-xs uppercase tracking-[0.2em] text-neutral-500">{htmlPage.content.org}</p>
+                    <p className="text-xs uppercase tracking-[0.2em] text-[#1a1a1a]">{htmlPage.content.org}</p>
                     <p className="text-sm font-semibold">{htmlPage.content.documentType}</p>
                     <h2 className="font-[family-name:var(--font-display)] text-3xl">
                       {htmlPage.content.designation}
                     </h2>
                     <p className="text-lg">{htmlPage.content.title}</p>
-                    <p className="text-xs text-neutral-500">ICS {htmlPage.content.ics}</p>
+                    <p className="text-xs text-[#1a1a1a]">ICS {htmlPage.content.ics}</p>
                     <p className="mt-6 text-xs text-emerald-800">{htmlPage.content.legalNote}</p>
                   </div>
                 )}
@@ -181,9 +192,11 @@ export function FullPreviewViewer({
               <p className="text-xs text-white/80">
                 {(usePdf ? page?.label : htmlPage?.label) ?? "Page"} · {pageIndex + 1}/{total || 1}
               </p>
-              <Link href={closeHref} className="text-sm text-white/90 underline hover:text-white">
-                Back to standards
-              </Link>
+              {showBack ? (
+                <Link href={closeHref} className="text-sm text-white/90 underline hover:text-white">
+                  Back to standards
+                </Link>
+              ) : null}
             </div>
             <Button
               type="button"

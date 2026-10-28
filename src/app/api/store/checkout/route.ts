@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { checkoutDescription, parseCheckoutLines, quoteCartLines } from "@/lib/store-checkout";
 import {
   getAccessToken,
   getPesapalConfig,
+  normalizePesapalPhone,
+  pesapalBillingAddress,
   resolveNotificationId,
-  splitBuyerName,
   submitOrderRequest,
 } from "@/lib/pesapal";
 
@@ -12,54 +14,71 @@ import {
  * Checkout: Pesapal API v3 hosted page. The standard is released only after
  * Pesapal reports COMPLETED. Card data is never stored.
  */
+async function readBody(req: NextRequest) {
+  const contentType = req.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    const body = await req.json().catch(() => ({}));
+    return { body, navigate: false };
+  }
+  const form = await req.formData();
+  return {
+    navigate: true,
+    body: {
+      provider: form.get("provider"),
+      buyerEmail: form.get("buyerEmail"),
+      buyerName: form.get("buyerName"),
+      buyerPhone: form.get("buyerPhone"),
+      locale: form.get("locale"),
+      catalogItemId: form.getAll("catalogItemId"),
+      editionLocale: form.getAll("editionLocale"),
+      channel: form.get("channel"),
+      next: form.get("next"),
+    },
+  };
+}
+
+function browserError(locale: string, next: string, message: string) {
+  const path = next === "cart" ? `/${locale}/store/cart` : `/${locale}/store`;
+  const dest = new URL(path, getPesapalConfig().appBaseUrl);
+  dest.searchParams.set("payError", message.slice(0, 180));
+  return NextResponse.redirect(dest, 303);
+}
+
 export async function POST(req: NextRequest) {
-  const body = await req.json();
+  const { body, navigate } = await readBody(req);
   const provider = String(body.provider || "");
   const buyerEmail = String(body.buyerEmail || "").toLowerCase().trim();
   const buyerName = String(body.buyerName || "").trim();
-  const buyerPhone = String(body.buyerPhone || "").replace(/[^\d+]/g, "");
+  const buyerPhone = normalizePesapalPhone(String(body.buyerPhone || ""));
   const locale = ["en", "fr", "pt", "ar"].includes(String(body.locale || "")) ? String(body.locale) : "en";
+  const next = body.next === "cart" ? "cart" : "store";
+  const fail = (message: string, status: number) =>
+    navigate ? browserError(locale, next, message) : NextResponse.json({ error: message }, { status });
 
   if (provider !== "PESAPAL") {
-    return NextResponse.json({ error: "Pay with Pesapal to buy this standard" }, { status: 400 });
+    return fail("Pay with Pesapal to buy these standards", 400);
   }
   if (!buyerName) {
-    return NextResponse.json({ error: "Buyer name is required" }, { status: 400 });
+    return fail("Buyer name is required", 400);
   }
   if (!buyerEmail || !buyerEmail.includes("@")) {
-    return NextResponse.json({ error: "Valid buyer email is required" }, { status: 400 });
+    return fail("Valid buyer email is required", 400);
   }
   if (buyerPhone.replace(/\D/g, "").length < 9) {
-    return NextResponse.json({ error: "A phone number is required for Pesapal" }, { status: 400 });
+    return fail("A phone number is required for Pesapal", 400);
   }
 
   const config = getPesapalConfig();
   if (!config.configured) {
-    return NextResponse.json(
-      {
-        error:
-          "Pesapal is not configured yet. Add the live consumer key and secret, then restart the app.",
-      },
-      { status: 503 },
-    );
+    return fail("Pesapal is not configured yet. Add the live consumer key and secret, then restart the app.", 503);
   }
   if (!config.appBaseUrl.startsWith("https://")) {
-    return NextResponse.json(
-      {
-        error:
-          "Pesapal must reach this app over https. Set APP_BASE_URL to the public address, then restart the app.",
-      },
-      { status: 503 },
-    );
+    return fail("Pesapal must reach this app over https. Set APP_BASE_URL to the public address, then restart the app.", 503);
   }
 
-  const item = await prisma.catalogItem.findUnique({
-    where: { id: String(body.catalogItemId) },
-    include: { standardVersion: { include: { standard: true } } },
-  });
-  if (!item || !item.active) return NextResponse.json({ error: "Catalog item not found" }, { status: 404 });
-  if (item.priceCents <= 0) {
-    return NextResponse.json({ error: "This standard has no price yet" }, { status: 400 });
+  const quote = await quoteCartLines(parseCheckoutLines(body));
+  if (!quote.payable) {
+    return fail(quote.problems[0]?.message || quote.currencyError || "Add at least one standard", 400);
   }
 
   const order = await prisma.order.create({
@@ -68,22 +87,23 @@ export async function POST(req: NextRequest) {
       buyerName,
       buyerPhone,
       status: "CHECKOUT",
-      totalCents: item.priceCents,
-      currency: item.currency,
+      totalCents: quote.totalCents,
+      currency: quote.currency,
       locale,
       lines: {
-        create: {
-          catalogItemId: item.id,
-          unitPriceCents: item.priceCents,
+        create: quote.lines.map((line) => ({
+          catalogItemId: line.catalogItemId,
+          unitPriceCents: line.unitPriceCents,
           qty: 1,
-        },
+          editionLocale: line.editionLocale,
+        })),
       },
       payments: {
         create: {
           provider,
           providerRef: null,
-          amountCents: item.priceCents,
-          currency: item.currency,
+          amountCents: quote.totalCents,
+          currency: quote.currency,
           status: "INITIATED",
         },
       },
@@ -117,22 +137,19 @@ export async function POST(req: NextRequest) {
       update: { notificationId },
     });
 
-    const { firstName, lastName } = splitBuyerName(buyerName);
-    const amount = item.priceCents / 100;
+    const amount = quote.totalCents / 100;
     const submitted = await submitOrderRequest(token, config.env, {
       id: order.id,
-      currency: item.currency,
+      currency: quote.currency,
       amount,
-      description: `${item.standardVersion.editionLabel} — ${item.coverTitle}`.slice(0, 100),
-      callback_url: `${config.appBaseUrl}/api/store/pesapal/callback?locale=${locale}`,
+      description: checkoutDescription(quote.lines),
+      callback_url: `${config.appBaseUrl}/api/store/pesapal/callback/${locale}`,
       notification_id: notificationId,
-      billing_address: {
-        email_address: buyerEmail,
-        phone_number: buyerPhone,
-        country_code: "KE",
-        first_name: firstName,
-        last_name: lastName,
-      },
+      billing_address: pesapalBillingAddress({
+        email: buyerEmail,
+        phone: buyerPhone,
+        fullName: buyerName,
+      }),
     });
 
     if (!submitted.redirect_url || !submitted.order_tracking_id) {
@@ -141,14 +158,9 @@ export async function POST(req: NextRequest) {
         where: { id: payment.id },
         data: { status: "FAILED", statusDetail: "NO_REDIRECT", rawJson: JSON.stringify(submitted) },
       });
-      return NextResponse.json(
-        {
-          error:
-            submitted.error?.message ||
-            submitted.message ||
-            "Pesapal did not return a redirect URL",
-        },
-        { status: 502 },
+      return fail(
+        submitted.error?.message || submitted.message || "Pesapal did not return a redirect URL",
+        502,
       );
     }
 
@@ -161,6 +173,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    if (navigate) return NextResponse.redirect(submitted.redirect_url, 303);
     return NextResponse.json({
       message: "Redirecting to Pesapal hosted checkout",
       orderId: order.id,
@@ -179,6 +192,6 @@ export async function POST(req: NextRequest) {
       },
     });
     const message = err instanceof Error ? err.message : "Pesapal checkout failed";
-    return NextResponse.json({ error: message }, { status: 502 });
+    return fail(message, 502);
   }
 }

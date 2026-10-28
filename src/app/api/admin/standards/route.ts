@@ -5,15 +5,30 @@ import { requirePermission } from "@/lib/require-auth";
 import { appendAuditEvent } from "@/lib/audit";
 import { assessMachinePackCompleteness } from "@/lib/fidelity";
 import { authoritativeLocaleOrNull, publicationStatusOrNull } from "@/lib/publication";
+import {
+  attachLanguageFiles,
+  ensureAuthoritativeLanguageFile,
+  parseIdList,
+  readStandardPayload,
+  replaceStandardAdoptions,
+  requireTechnicalCommittee,
+  standardKindOrNull,
+} from "@/lib/standard-meta";
 
 export async function GET() {
   const auth = await requirePermission("standards:read");
   if (auth.error) return auth.error;
   const rows = await prisma.standard.findMany({
     include: {
+      technicalCommittee: { include: { sector: true } },
+      adoptions: { include: { memberState: true } },
       versions: {
         orderBy: { year: "desc" },
-        include: { catalogItem: true, _count: { select: { tariffMaps: true } } },
+        include: {
+          catalogItem: true,
+          languageFiles: true,
+          _count: { select: { tariffMaps: true } },
+        },
       },
     },
     orderBy: { designation: "asc" },
@@ -24,7 +39,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const auth = await requirePermission("standards:write");
   if (auth.error) return auth.error;
-  const body = await req.json();
+  const { body, files } = await readStandardPayload(req);
 
   const designation = String(body.designation || "").trim();
   const titleEn = String(body.titleEn || "").trim();
@@ -50,11 +65,43 @@ export async function POST(req: NextRequest) {
   if (!authoritativeLocale) {
     return NextResponse.json({ error: "Choose a language from the list" }, { status: 400 });
   }
+  const kind = body.kind != null && String(body.kind).trim() ? standardKindOrNull(body.kind) : "PRODUCT";
+  if (!kind) {
+    return NextResponse.json({ error: "Choose a standard kind from the list" }, { status: 400 });
+  }
+  let technicalCommitteeId: string;
+  try {
+    technicalCommitteeId = (await requireTechnicalCommittee(String(body.technicalCommitteeId || ""))).id;
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Choose a technical committee" },
+      { status: 400 },
+    );
+  }
+  const memberStateIds = parseIdList(body.memberStateIds);
+  if (memberStateIds.length) {
+    const found = await prisma.memberState.count({ where: { id: { in: memberStateIds } } });
+    if (found !== memberStateIds.length) {
+      return NextResponse.json({ error: "Choose adopting countries from the African Union member states" }, { status: 400 });
+    }
+  }
 
   const editionLabel = String(body.editionLabel || `${designation}:${year}`).trim();
-  const machine =
+  type MachineDoc = {
+    contentHash?: string;
+    scope?: unknown;
+    normativeReferences?: unknown;
+    requirements?: unknown;
+    packaging?: unknown;
+    labelling?: unknown;
+    sampling?: unknown;
+    fullText?: unknown;
+    standard?: unknown;
+    version?: unknown;
+  };
+  const machine: MachineDoc =
     body.machineDoc && typeof body.machineDoc === "object"
-      ? body.machineDoc
+      ? (body.machineDoc as MachineDoc)
       : {
           standard: { designation, title: { en: titleEn }, ics: ics.split(",").map((s: string) => s.trim()).filter(Boolean), publisher: body.publisher || "ARSO" },
           version: {
@@ -80,8 +127,8 @@ export async function POST(req: NextRequest) {
 
   const completeness = assessMachinePackCompleteness({
     scope: machine.scope,
-    normativeReferences: machine.normativeReferences,
-    requirements: machine.requirements,
+    normativeReferences: Array.isArray(machine.normativeReferences) ? machine.normativeReferences : [],
+    requirements: Array.isArray(machine.requirements) ? machine.requirements : [],
     packaging: machine.packaging,
     labelling: machine.labelling,
     sampling: machine.sampling,
@@ -96,20 +143,22 @@ export async function POST(req: NextRequest) {
       id: stdId,
       designation,
       titleEn,
-      titleFr: body.titleFr || null,
-      titlePt: body.titlePt || null,
-      titleAr: body.titleAr || null,
+      titleFr: body.titleFr ? String(body.titleFr) : null,
+      titlePt: body.titlePt ? String(body.titlePt) : null,
+      titleAr: body.titleAr ? String(body.titleAr) : null,
       ics: ics || "00.000",
-      publisher: body.publisher || "ARSO",
+      publisher: String(body.publisher || "ARSO"),
+      kind,
+      technicalCommitteeId,
       versions: {
         create: {
           id: verId,
           editionLabel,
           year,
-          effectiveFrom: body.effectiveFrom ? new Date(body.effectiveFrom) : new Date(),
+          effectiveFrom: body.effectiveFrom ? new Date(String(body.effectiveFrom)) : new Date(),
           publicationStatus,
           authoritativeLocale,
-          sourcePdfUri: body.sourcePdfUri || null,
+          sourcePdfUri: body.sourcePdfUri ? String(body.sourcePdfUri) : null,
           contentHash: machine.contentHash,
           scopeEn,
           machineDocJson: JSON.stringify(machine),
@@ -153,6 +202,18 @@ export async function POST(req: NextRequest) {
         effectiveFrom: new Date(),
       },
     });
+  }
+
+  try {
+    await replaceStandardAdoptions(standard.id, memberStateIds);
+    await attachLanguageFiles(verId, files, authoritativeLocale);
+    const version = await prisma.standardVersion.findUnique({ where: { id: verId } });
+    await ensureAuthoritativeLanguageFile(verId, authoritativeLocale, version?.sourcePdfUri);
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Could not save adoption or language files" },
+      { status: 400 },
+    );
   }
 
   await appendAuditEvent({

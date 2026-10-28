@@ -20,6 +20,12 @@ export const CLIENT_MARK_GRANTS = [
   { value: "BOTH", label: "Quality Mark and Eco Mark Africa" },
 ] as const;
 
+/** Marks on one product. Eco is a second standard and a second certificate. */
+export const PRODUCT_COVERAGE = [
+  { value: "QUALITY", label: "Quality Mark" },
+  { value: "BOTH", label: "Quality Mark and Eco Mark Africa" },
+] as const;
+
 export const LICENSE_STATUSES = [
   { value: "PENDING", label: "Pending" },
   { value: "APPROVED", label: "Approved" },

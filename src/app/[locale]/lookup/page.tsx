@@ -5,9 +5,11 @@ import { prisma } from "@/lib/db";
 import { isLocale, t, type Locale } from "@/lib/i18n";
 import { resolveTariffStandardsPack } from "@/lib/tariff";
 import { extractClause1ScopeOnly } from "@/lib/scope-text";
+import { adoptionRate, standardKindLabel } from "@/lib/standard-kinds";
 import { Badge } from "@/components/ui/badge";
-import { FlowNav } from "@/components/flow-nav";
-import { LookupForm } from "./lookup-form";
+import { importedProductCountsByStandard } from "@/lib/imported-marks";
+import { ScopeReveal } from "@/components/scope-reveal";
+import { LookupForm, type LookupRec } from "./lookup-form";
 
 const PAGE_SIZE = 8;
 
@@ -22,19 +24,23 @@ export default async function LookupPage({
   if (!isLocale(raw)) notFound();
   const locale = raw as Locale;
   const sp = await searchParams;
-  const rec = (sp.rec || "EAC").toUpperCase();
+  const requestedRec = (sp.rec || "").toUpperCase();
   const code = (sp.code || "").trim();
   const page = Math.max(1, Number(sp.page) || 1);
   const searching = Boolean(code);
 
-  const [tariffResult, tariffRows, standardsTotal] = await Promise.all([
-    searching ? resolveTariffStandardsPack(rec, code, { publicView: true }) : Promise.resolve(null),
+  const [recRows, tariffRows, standardsTotal] = await Promise.all([
+    prisma.rec.findMany({ orderBy: { code: "asc" } }),
     prisma.tariffLine.findMany({
       include: { rec: true },
       orderBy: [{ codeLength: "asc" }, { codeNormalized: "asc" }],
     }),
     prisma.standard.count(),
   ]);
+  const recs: LookupRec[] = recRows.map((row) => ({ code: row.code, name: row.name }));
+  const rec = recs.some((row) => row.code === requestedRec) ? requestedRec : recs[0]?.code || "";
+  const tariffResult =
+    searching && rec ? await resolveTariffStandardsPack(rec, code, { publicView: true }) : null;
 
   // Always list standards (paginated). Tariff search narrows to applicable packs.
   type ListedTariff = {
@@ -53,6 +59,13 @@ export default async function LookupPage({
     standardVersionId: string;
     tariffLines: ListedTariff[];
     certifiedCount?: number;
+    kindLabel: string;
+    sectorName: string | null;
+    committeeName: string | null;
+    adopted: number;
+    adoptionTotal: number;
+    adoptionPercent: number;
+    adoptingCountries: string[];
   };
 
   let listed: ListedStandard[] = [];
@@ -77,6 +90,13 @@ export default async function LookupPage({
           codeDisplay: tl.codeDisplay,
           description: tl.description,
         })),
+      kindLabel: "",
+      sectorName: null,
+      committeeName: null,
+      adopted: 0,
+      adoptionTotal: 0,
+      adoptionPercent: 0,
+      adoptingCountries: [],
     }));
     listTotal = listed.length;
     listPageCount = Math.max(1, Math.ceil(listTotal / PAGE_SIZE));
@@ -154,9 +174,47 @@ export default async function LookupPage({
           codeDisplay: m.tariffLine.codeDisplay,
           description: m.tariffLine.description,
         })),
+        kindLabel: "",
+        sectorName: null,
+        committeeName: null,
+        adopted: 0,
+        adoptionTotal: 0,
+        adoptionPercent: 0,
+        adoptingCountries: [],
       };
     });
   }
+
+  const designations = [...new Set(listed.map((item) => item.designation))];
+  const [adoptionRows, memberStateTotal] = await Promise.all([
+    designations.length
+      ? prisma.standard.findMany({
+          where: { designation: { in: designations } },
+          include: {
+            technicalCommittee: { include: { sector: true } },
+            adoptions: { include: { memberState: true }, orderBy: { memberState: { name: "asc" } } },
+          },
+        })
+      : Promise.resolve([]),
+    prisma.memberState.count(),
+  ]);
+  const adoptionByDesignation = new Map(adoptionRows.map((row) => [row.designation, row]));
+  listed = listed.map((item) => {
+    const row = adoptionByDesignation.get(item.designation);
+    const rate = adoptionRate(row?.adoptions.length ?? 0, memberStateTotal);
+    return {
+      ...item,
+      kindLabel: standardKindLabel(row?.kind || "PRODUCT", locale),
+      sectorName: row?.technicalCommittee?.sector.name ?? null,
+      committeeName: row?.technicalCommittee
+        ? `${row.technicalCommittee.code} — ${row.technicalCommittee.name}`
+        : null,
+      adopted: rate.adopted,
+      adoptionTotal: rate.total,
+      adoptionPercent: rate.percent,
+      adoptingCountries: row?.adoptions.map((adoption) => adoption.memberState.name) ?? [],
+    };
+  });
 
   const versionIds = listed.map((s) => s.standardVersionId).filter(Boolean);
   const certGroups = versionIds.length
@@ -167,9 +225,11 @@ export default async function LookupPage({
       })
     : [];
   const certifiedByVersion = new Map(certGroups.map((g) => [g.standardVersionId, g._count._all]));
+  const importedCounts = await importedProductCountsByStandard(versionIds);
   listed = listed.map((s) => ({
     ...s,
-    certifiedCount: certifiedByVersion.get(s.standardVersionId) ?? 0,
+    certifiedCount:
+      (certifiedByVersion.get(s.standardVersionId) ?? 0) + (importedCounts.get(s.standardVersionId) ?? 0),
   }));
 
   const options = tariffRows.map((l) => ({
@@ -196,14 +256,13 @@ export default async function LookupPage({
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-10">
+    <div className="shell py-10">
       <div className="rise mb-8 max-w-2xl">
         <p className="text-xs uppercase tracking-[0.22em] text-[var(--muted)]">Public customs portal</p>
         <h1 className="mt-2 font-[family-name:var(--font-display)] text-3xl text-[var(--ink)] sm:text-4xl">
           {t(locale, "lookupTitle")}
         </h1>
         <p className="mt-2 text-[var(--muted)]">{t(locale, "lookupHint")}</p>
-        <FlowNav locale={locale} current="lookup" />
         <p className="mt-3 text-sm text-[var(--muted)]">
           Browse African Standards below (name and Scope). Use the tariff dropdown to{" "}
           <strong className="font-medium text-[var(--ink)]">search</strong> which standards apply to a
@@ -211,7 +270,7 @@ export default async function LookupPage({
         </p>
       </div>
 
-      <LookupForm locale={locale} initialRec={rec} initialCode={defaultCode} options={options} />
+      <LookupForm locale={locale} initialRec={rec} initialCode={defaultCode} options={options} recs={recs} />
 
       <div className="mt-8">
         {tariffPanel}
@@ -233,7 +292,7 @@ export default async function LookupPage({
               : "No standards in the catalogue yet. Administrators can import or create them under Admin."}
           </p>
         ) : (
-          <div className="space-y-6">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {listed.map((std) => {
               const previewHref = std.catalogItemId
                 ? `/${locale}/store?preview=${encodeURIComponent(std.catalogItemId)}`
@@ -249,6 +308,21 @@ export default async function LookupPage({
                       {std.editionLabel}
                     </h3>
                     <p className="mt-1 text-[var(--ink)]">{std.titleEn}</p>
+                    <p className="mt-2 text-sm text-[var(--muted)]">
+                      {t(locale, "Category")}: {std.kindLabel}
+                      {std.sectorName ? ` · ${t(locale, "Sector")}: ${std.sectorName}` : ""}
+                      {std.committeeName ? ` · ${t(locale, "Technical committee")}: ${std.committeeName}` : ""}
+                    </p>
+                    <p className="mt-1 text-sm">
+                      <span className="font-semibold">{t(locale, "Adopted by")} </span>
+                      {std.adopted} {t(locale, "of")} {std.adoptionTotal} · {std.adoptionPercent}%
+                      <span className="text-[var(--muted)]"> {t(locale, "African Union member states")}</span>
+                    </p>
+                    <p className="mt-1 text-sm text-[var(--muted)]">
+                      {std.adoptingCountries.length
+                        ? std.adoptingCountries.join(", ")
+                        : t(locale, "No adopting countries recorded")}
+                    </p>
                     <div className="mt-3">
                       <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted)]">
                         Tariff line
@@ -282,9 +356,9 @@ export default async function LookupPage({
                   <div className="space-y-4 p-5">
                     <div>
                       <h4 className="text-sm font-semibold text-[var(--muted)]">1 Scope</h4>
-                      <p className="mt-2 text-sm leading-relaxed">
-                        {std.scopeEn || "Scope text not yet available for this standard."}
-                      </p>
+                      <div className="mt-2">
+                        <ScopeReveal text={std.scopeEn} />
+                      </div>
                     </div>
                     <div className="flex flex-wrap gap-3">
                       {previewHref ? (

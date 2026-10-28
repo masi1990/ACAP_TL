@@ -10,6 +10,7 @@ const display = Fraunces({
 const body = Source_Sans_3({
   variable: "--font-body",
   subsets: ["latin", "latin-ext"],
+  weight: ["600", "700"],
 });
 
 const mono = Geist_Mono({
@@ -18,15 +19,28 @@ const mono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ACAP Trade — ARSO ACAP–TL",
+  title: "ACAP — African Organisation for Standardisation (ARSO)",
   description:
-    "Continental conformity and trade hub: tariff → ARS standards → CoC / PIN verification for AfCFTA corridors.",
+    "ARSO Conformity Assessment Programme (ACAP). One Standard — One Test — One Certificate — Accepted Everywhere.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable} h-full`}>
-      <body className="relative min-h-full antialiased">{children}</body>
+    <html
+      lang="en"
+      translate="no"
+      suppressHydrationWarning
+      className={`${display.variable} ${body.variable} ${mono.variable} h-full`}
+    >
+      <body className="relative min-h-full" suppressHydrationWarning>
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              'try{var v=localStorage.getItem("acap-font-size");if(v==="small"||v==="smaller"||v==="smallest")document.documentElement.dataset.fontSize=v}catch(e){}',
+          }}
+        />
+        {children}
+      </body>
     </html>
   );
 }

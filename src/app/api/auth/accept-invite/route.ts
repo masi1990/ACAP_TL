@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { appendAuditEvent } from "@/lib/audit";
 import { createSession, hashPassword } from "@/lib/auth";
-import { grantGlobalRole, replaceOrgRole } from "@/lib/org-accounts";
+import { grantGlobalRole, grantOrgRole } from "@/lib/org-accounts";
+import { appointStandardsOfficer } from "@/lib/library";
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
@@ -43,12 +44,30 @@ export async function POST(req: NextRequest) {
       grantedById: invite.invitedById,
     });
   } else {
-    await replaceOrgRole({
-      userId: user.id,
-      organizationId: invite.organizationId,
-      roleCode: invite.role,
-      grantedById: invite.invitedById,
-    });
+    if (invite.role === "LIBRARY_OFFICER") {
+      const org = await prisma.organization.findUnique({
+        where: { id: invite.organizationId },
+        include: { operatingCountries: true },
+      });
+      const memberStateId = org?.memberStateId || org?.operatingCountries[0]?.memberStateId;
+      if (!org || !memberStateId) {
+        return NextResponse.json({ error: "This institution has no country" }, { status: 400 });
+      }
+      await appointStandardsOfficer({
+        userId: user.id,
+        organizationId: org.id,
+        memberStateId,
+        grantedById: invite.invitedById,
+        scope: "FULL",
+      });
+    } else {
+      await grantOrgRole({
+        userId: user.id,
+        organizationId: invite.organizationId,
+        roleCode: invite.role,
+        grantedById: invite.invitedById,
+      });
+    }
   }
   await prisma.invitation.update({ where: { id: invite.id }, data: { acceptedAt: new Date() } });
   await appendAuditEvent({

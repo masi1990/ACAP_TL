@@ -2,10 +2,12 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { can } from "@/lib/rbac";
-import { isLocale, type Locale } from "@/lib/i18n";
+import { isLocale, t, type Locale } from "@/lib/i18n";
 import { countryOptions } from "@/lib/countries";
-import { CrudForm } from "@/components/admin/crud-form";
+import { customsDeskProduct } from "@/lib/customs-desk";
+import { withDecisionActors } from "@/lib/line-actor";
 import { ClientRedirect } from "@/components/admin/client-redirect";
+import { CustomsDesk } from "./customs-desk";
 
 export default async function CustomsDeskPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale: raw } = await params;
@@ -17,55 +19,46 @@ export default async function CustomsDeskPage({ params }: { params: Promise<{ lo
 
   const products = await prisma.product.findMany({
     include: {
-      standardLinks: { include: { standardVersion: { include: { standard: true } } } },
       company: { include: { clientAccount: { include: { organization: true } } } },
+      standardLinks: { include: { standardVersion: { include: { standard: true } } } },
+      applications: {
+        orderBy: { createdAt: "desc" },
+        include: {
+          organization: true,
+          recordedBy: { select: { name: true, email: true } },
+          coc: true,
+          standardVersion: { include: { standard: true } },
+          testDossier: true,
+          assessmentItems: {
+            include: { evidence: true, recordedBy: { select: { name: true, email: true } } },
+            orderBy: { sortOrder: "asc" },
+          },
+          dossierAttachments: { orderBy: { uploadedAt: "asc" } },
+        },
+      },
+      inspections: { orderBy: { inspectedAt: "desc" } },
+      clearances: { orderBy: { decidedAt: "desc" } },
     },
     orderBy: { name: "asc" },
   });
-  const countries = countryOptions();
-  const productOptions = products.map((product) => {
-    const designation = product.standardLinks[0]?.standardVersion.standard.designation ?? "no standard";
-    return {
-      value: product.id,
-      label: `${product.name} · ${designation} · ${product.company.clientAccount.organization.name}`,
-    };
-  });
 
   return (
-    <main className="mx-auto max-w-6xl space-y-6 px-4 py-10">
+    <main className="shell space-y-6 py-10">
       <div>
         <p className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">Border desk</p>
-        <h1 className="mt-2 font-[family-name:var(--font-display)] text-3xl sm:text-4xl">Customs</h1>
+        <h1 className="mt-2 font-[family-name:var(--font-display)] text-3xl sm:text-4xl">{t(locale, "Customs")}</h1>
         <p className="mt-2 max-w-3xl text-sm text-[var(--muted)]">
-          Allow is accepted only when that product already has its one certificate. Entry is from one
-          country into another.
+          Choose a product, then use the tabs for the border decision, the certificate, the certification record,
+          documents, and the standard. Documents and the standard open for viewing only.
         </p>
       </div>
-      {productOptions.length === 0 ? (
+      {products.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">No products to decide yet.</p>
       ) : (
-        <CrudForm
-          idPrefix="customs-"
-          action="/api/chain/customs"
-          submitLabel="Record border decision"
-          fields={[
-            { name: "productId", label: "Product", type: "select", required: true, options: productOptions },
-            { name: "originIso2", label: "Origin country", type: "select", required: true, options: countries },
-            { name: "destinationIso2", label: "Destination country", type: "select", required: true, options: countries },
-            {
-              name: "decision",
-              label: "Decision",
-              type: "select",
-              required: true,
-              defaultValue: "HOLD",
-              options: [
-                { value: "ALLOW", label: "Allow entry" },
-                { value: "HOLD", label: "Hold" },
-                { value: "REFUSE", label: "Refuse entry" },
-              ],
-            },
-            { name: "reason", label: "Reason", type: "textarea" },
-          ]}
+        <CustomsDesk
+          locale={locale}
+          products={(await withDecisionActors(products)).map(customsDeskProduct)}
+          countries={countryOptions()}
         />
       )}
     </main>

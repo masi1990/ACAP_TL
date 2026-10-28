@@ -34,6 +34,27 @@ export function requestedClientMark(raw: unknown): "QUALITY" | "ECO" {
   throw new Error("Choose the Quality Mark or the Eco Mark.");
 }
 
+const ECO_ALONE =
+  "Eco Mark Africa is certified together with the Quality Mark, against its own standard.";
+
+/** Quality only, or Quality and Eco. Eco is never stored on its own. */
+export function requestedCoverage(raw: unknown): "QUALITY" | "BOTH" {
+  const value = String(raw || "QUALITY").trim().toUpperCase();
+  if (value === "BOTH") return "BOTH";
+  if (value === "QUALITY" || value === "") return "QUALITY";
+  if (value === "ECO") throw new Error(ECO_ALONE);
+  throw new Error("Choose the Quality Mark, or the Quality Mark and Eco Mark Africa.");
+}
+
+export function coverageFromBody(body: Record<string, unknown>) {
+  const coverage = requestedCoverage(body.markCoverage ?? body.markScheme);
+  const ecoStandardVersionId = String(body.ecoStandardVersionId || "").trim();
+  if (coverage === "BOTH" && !ecoStandardVersionId) {
+    throw new Error("Choose the standard for Eco Mark Africa.");
+  }
+  return { coverage, ecoStandardVersionId };
+}
+
 /** Save the marks a certification body may grant. Eco is stored only together with Quality. */
 export async function saveCbMarkLicences(organizationId: string, body: Record<string, unknown>) {
   const touched = ["clientMarks", "markScheme", "licenseNumber", "licenseStatus", "issuedAt", "expiresAt"].some(

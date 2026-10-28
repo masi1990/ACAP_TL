@@ -1,8 +1,9 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { getSessionUser } from "@/lib/auth";
 import { authorityOwnerStateIds, can, roleLabel } from "@/lib/rbac";
 import { canOpenAdmin } from "@/lib/navigation";
-import type { Locale } from "@/lib/i18n";
+import { t, type Locale } from "@/lib/i18n";
 import { ClientRedirect } from "@/components/admin/client-redirect";
 import { NavTabs } from "@/components/nav-tabs";
 
@@ -42,55 +43,83 @@ export async function AdminChrome({
     return <ClientRedirect href={`/${locale}/login?next=/${locale}/admin`} />;
   }
 
+  const systemAdmin = canOpenAdmin(session.user);
   const ownsInstitution = authorityOwnerStateIds(session.user).length > 0;
-  if (!canOpenAdmin(session.user)) {
-    return <ClientRedirect href={`/${locale}/dashboard`} />;
+  const pathname = (await headers()).get("x-pathname") || "";
+  const onInstitutions = pathname.includes("/admin/institutions");
+  if (!systemAdmin && !(ownsInstitution && onInstitutions)) {
+    return (
+      <ClientRedirect
+        href={ownsInstitution ? `/${locale}/admin/institutions` : `/${locale}/dashboard`}
+      />
+    );
   }
 
   const nav = [
-    { href: `/${locale}/admin`, label: "Overview", show: true },
-    { href: `/${locale}/admin/recs`, label: "RECs", show: can(session.user, "recs:read") },
-    { href: `/${locale}/admin/tariffs`, label: "Tariff codes", show: can(session.user, "tariffs:read") },
-    { href: `/${locale}/admin/standards`, label: "Standards", show: can(session.user, "standards:read") },
+    { href: `/${locale}/admin`, label: t(locale, "Overview"), show: systemAdmin },
+    { href: `/${locale}/admin/recs`, label: t(locale, "RECs"), show: systemAdmin && can(session.user, "recs:read") },
+    { href: `/${locale}/admin/tariffs`, label: t(locale, "Tariff codes"), show: systemAdmin && can(session.user, "tariffs:read") },
+    { href: `/${locale}/admin/sectors`, label: t(locale, "Sectors"), show: systemAdmin && can(session.user, "standards:read") },
+    { href: `/${locale}/admin/standards`, label: t(locale, "Standards"), show: systemAdmin && can(session.user, "standards:read") },
+    { href: `/${locale}/admin/prices`, label: t(locale, "Prices"), show: systemAdmin && can(session.user, "standards:read") },
+    {
+      href: `/${locale}/admin/library`,
+      label: "Library",
+      show: can(session.user, "institutions:write") || can(session.user, "audit:read"),
+    },
     {
       href: `/${locale}/admin/standards/import`,
-      label: "Import PDF/Word",
-      show: can(session.user, "standards:import"),
+      label: t(locale, "Import PDF/Word"),
+      show: systemAdmin && can(session.user, "standards:import"),
     },
-    { href: `/${locale}/admin/prices`, label: "Price table", show: can(session.user, "standards:read") },
+    { href: `/${locale}/admin/imported-marks`, label: "Copied marks", show: systemAdmin && (can(session.user, "products:read") || can(session.user, "portal:operate")) },
     {
       href: `/${locale}/admin/institutions`,
-      label: "Institutions",
+      label: t(locale, "Institutions"),
       show: can(session.user, "institutions:read") || ownsInstitution,
     },
     {
       href: `/${locale}/admin/manufacturers`,
-      label: "Manufacturer / importer",
-      show: can(session.user, "manufacturer:read"),
+      label: t(locale, "Manufacturer / importer"),
+      show: systemAdmin && can(session.user, "manufacturer:read"),
     },
     {
       href: `/${locale}/admin/roles`,
-      label: "Roles & RBAC",
-      show: can(session.user, "roles:read"),
+      label: t(locale, "Roles & RBAC"),
+      show: systemAdmin && can(session.user, "roles:read"),
+    },
+    {
+      href: `/${locale}/admin/orders`,
+      label: t(locale, "Orders"),
+      show: systemAdmin && can(session.user, "audit:read"),
+    },
+    {
+      href: `/${locale}/admin/audit`,
+      label: t(locale, "Audit"),
+      show: systemAdmin && can(session.user, "audit:read"),
     },
   ].filter((n) => n.show);
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8">
+    <div className="shell py-8">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">Hub administration</p>
+          <p className="text-xs uppercase tracking-[0.2em] text-[var(--muted)]">
+            {systemAdmin ? t(locale, "System admin") : t(locale, "Institutions")}
+          </p>
           <h1 className="font-[family-name:var(--font-display)] text-2xl text-[var(--ink)] sm:text-3xl">
-            Catalogue &amp; organisations
+            {systemAdmin ? t(locale, "Catalogue & organisations") : t(locale, "Your country's institutions")}
           </h1>
           <p className="mt-1 max-w-2xl text-sm text-[var(--muted)]">
             Signed in as {session.user.email}
             {assignedRoleLabels(session.user).length > 0 ? ` · ${assignedRoleLabels(session.user).join(", ")}` : ""}.
-            Enter data in tab order: REC, tariff code, standard, price, institution, then manufacturer.
+            {systemAdmin
+              ? " Enter data in tab order: REC, tariff code, standard, price, institution, then manufacturer."
+              : " You manage the institutions for your country. Catalogue administration stays with the system admin."}
           </p>
         </div>
         <Link href={`/${locale}/dashboard`} className="text-sm text-[var(--accent)] underline">
-          Back to dashboard
+          {t(locale, "Back to dashboard")}
         </Link>
       </div>
       <NavTabs items={nav.map((item) => ({ href: item.href, label: item.label }))} />

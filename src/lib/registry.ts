@@ -5,6 +5,7 @@
  */
 import { prisma } from "@/lib/db";
 import { countryByIso2, countriesGroupedByRegion } from "@/lib/africa-regions";
+import { importedRegistryRows } from "@/lib/imported-marks";
 
 export type MarkFilter = "ALL" | "QUALITY" | "ECO" | "BOTH";
 export type StatusFilter = "ALL" | "certified" | "expired" | "suspended" | "withdrawn";
@@ -24,6 +25,19 @@ export type RegistryProduct = {
   marks: Array<"QUALITY" | "ECO">;
   issuedAt: string;
   expiresAt: string;
+  certificates: Array<{
+    certificateNo: string;
+    status: string;
+    markScheme: "QUALITY" | "ECO";
+    issuedAt: string;
+    expiresAt: string;
+    standard: {
+      designation: string;
+      editionLabel: string;
+      titleEn: string;
+      standardVersionId: string;
+    };
+  }>;
   standard: {
     designation: string;
     editionLabel: string;
@@ -37,6 +51,8 @@ export type RegistryProduct = {
   } | null;
   cbName: string;
   pinCode: string | null;
+  pinCodes?: string[];
+  brand?: string;
 };
 
 function markListFromCoc(markScheme: string, grants: Array<{ markScheme: string; status: string }>) {
@@ -74,23 +90,7 @@ export async function listCertifiedProducts(opts: {
 
   const cocs = await prisma.coC.findMany({
     where: {
-      ...(status ? { status } : {}),
-      application: {
-        ...(opts.standardVersionId ? { standardVersionId: opts.standardVersionId } : {}),
-        ...(opts.designation
-          ? { standardVersion: { standard: { designation: opts.designation } } }
-          : {}),
-        ...(rec
-          ? {
-              standardVersion: {
-                tariffMaps: { some: { tariffLine: { rec: { code: rec } } } },
-              },
-            }
-          : {}),
-        ...(country
-          ? { product: { company: { countryIso2: country } } }
-          : {}),
-      },
+      ...(country ? { application: { product: { company: { countryIso2: country } } } } : {}),
     },
     include: {
       markGrants: true,
@@ -120,22 +120,48 @@ export async function listCertifiedProducts(opts: {
   const regionLabel = (id: string | null) =>
     id ? regionGroups.find((r) => r.id === id)?.label || id : null;
 
-  let rows: RegistryProduct[] = cocs.map((c) => {
-    const product = c.application.product;
+  const grouped = new Map<string, typeof cocs>();
+  for (const coc of cocs) {
+    const productId = coc.application.product.id;
+    const list = grouped.get(productId) || [];
+    list.push(coc);
+    grouped.set(productId, list);
+  }
+
+  let rows: RegistryProduct[] = [...grouped.values()].map((group) => {
+    const ordered = [...group].sort((a, b) => Number(a.markScheme === "ECO") - Number(b.markScheme === "ECO"));
+    const primary = ordered.find((row) => row.markScheme === "QUALITY") || ordered[0];
+    const product = primary.application.product;
     const company = product.company;
     const countryMeta = countryByIso2(company.countryIso2);
-    const marks = markListFromCoc(c.markScheme, c.markGrants);
-    const markScheme =
-      marks.includes("QUALITY") && marks.includes("ECO")
-        ? "BOTH"
-        : marks[0] || c.markScheme;
-    const sv = c.application.standardVersion;
+    const marks = new Set<"QUALITY" | "ECO">();
+    for (const coc of ordered) {
+      for (const mark of markListFromCoc(coc.markScheme, coc.markGrants)) marks.add(mark);
+    }
+    const markList = [...marks];
+    const markScheme = markList.includes("QUALITY") && markList.includes("ECO") ? "BOTH" : markList[0] || primary.markScheme;
+    const certificates = ordered.map((coc) => {
+      const sv = coc.application.standardVersion;
+      const mark = coc.markScheme === "ECO" ? "ECO" : "QUALITY";
+      return {
+        certificateNo: coc.certificateNo,
+        status: coc.status,
+        markScheme: mark as "QUALITY" | "ECO",
+        issuedAt: coc.issuedAt.toISOString(),
+        expiresAt: coc.expiresAt.toISOString(),
+        standard: {
+          designation: sv.standard.designation,
+          editionLabel: sv.editionLabel,
+          titleEn: sv.standard.titleEn,
+          standardVersionId: sv.id,
+        },
+      };
+    });
     const tariffFromProduct = product.tariffLine;
-    const tariffFromMap = sv.tariffMaps[0]?.tariffLine;
+    const tariffFromMap = ordered.map((coc) => coc.application.standardVersion.tariffMaps[0]?.tariffLine).find(Boolean);
     const tariff = tariffFromProduct || tariffFromMap || null;
-
     return {
-      id: c.id,
+      id: product.id,
       productName: product.name,
       commodity: product.commodity,
       companyName: company.legalName,
@@ -143,18 +169,14 @@ export async function listCertifiedProducts(opts: {
       countryName: countryMeta?.name || company.countryIso2,
       regionId: countryMeta?.region || null,
       regionLabel: regionLabel(countryMeta?.region || null),
-      certificateNo: c.certificateNo,
-      status: c.status,
+      certificateNo: primary.certificateNo,
+      status: primary.status,
       markScheme,
-      marks,
-      issuedAt: c.issuedAt.toISOString(),
-      expiresAt: c.expiresAt.toISOString(),
-      standard: {
-        designation: sv.standard.designation,
-        editionLabel: sv.editionLabel,
-        titleEn: sv.standard.titleEn,
-        standardVersionId: sv.id,
-      },
+      marks: markList,
+      issuedAt: primary.issuedAt.toISOString(),
+      expiresAt: primary.expiresAt.toISOString(),
+      certificates,
+      standard: certificates[0].standard,
       tariff: tariff
         ? {
             codeDisplay: tariff.codeDisplay,
@@ -162,10 +184,13 @@ export async function listCertifiedProducts(opts: {
             rec: tariff.rec.code,
           }
         : null,
-      cbName: c.application.organization.name,
-      pinCode: c.pins[0]?.pinCode || null,
+      cbName: primary.application.organization.name,
+      pinCode: ordered.map((coc) => coc.pins[0]?.pinCode).find(Boolean) || null,
+      pinCodes: ordered.map((coc) => coc.pins[0]?.pinCode).filter((code): code is string => Boolean(code)),
     };
   });
+
+  rows.push(...(await importedRegistryRows()));
 
   if (opts.region) {
     const rid = opts.region.toUpperCase();
@@ -180,6 +205,23 @@ export async function listCertifiedProducts(opts: {
     }
   }
 
+  if (status) {
+    rows = rows.filter((r) => r.certificates.some((certificate) => certificate.status === status));
+  }
+  if (opts.standardVersionId) {
+    rows = rows.filter((r) =>
+      r.certificates.some((certificate) => certificate.standard.standardVersionId === opts.standardVersionId),
+    );
+  }
+  if (opts.designation) {
+    rows = rows.filter((r) =>
+      r.certificates.some((certificate) => certificate.standard.designation === opts.designation),
+    );
+  }
+  if (rec) {
+    rows = rows.filter((r) => r.tariff?.rec === rec);
+  }
+
   if (opts.q?.trim()) {
     const q = opts.q.trim().toLowerCase();
     rows = rows.filter((r) => {
@@ -188,11 +230,18 @@ export async function listCertifiedProducts(opts: {
         r.companyName,
         r.commodity,
         r.certificateNo,
+        ...r.certificates.flatMap((certificate) => [
+          certificate.certificateNo,
+          certificate.standard.designation,
+          certificate.standard.titleEn,
+        ]),
         r.standard.designation,
         r.standard.titleEn,
         r.countryName,
         r.tariff?.codeDisplay,
         r.pinCode,
+        r.brand,
+        ...(r.pinCodes || []),
       ]
         .filter(Boolean)
         .join(" ")

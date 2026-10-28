@@ -106,12 +106,22 @@ async function pesapalFetch<T>(
   };
   if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
 
-  const res = await fetch(`${baseUrl(env)}${path}`, {
-    method: opts.method ?? (opts.body ? "POST" : "GET"),
-    headers,
-    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-    cache: "no-store",
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${baseUrl(env)}${path}`, {
+      method: opts.method ?? (opts.body ? "POST" : "GET"),
+      headers,
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+      cache: "no-store",
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch (err) {
+    const name = err instanceof Error ? err.name : "";
+    if (name === "TimeoutError" || name === "AbortError") {
+      throw new Error("Pesapal did not respond. The payment service is not answering, so checkout cannot continue.");
+    }
+    throw err;
+  }
 
   const text = await res.text();
   let data: T;
@@ -241,4 +251,36 @@ export function splitBuyerName(fullName: string): { firstName: string; lastName:
   if (parts.length === 0) return { firstName: "Buyer", lastName: "" };
   if (parts.length === 1) return { firstName: parts[0], lastName: "" };
   return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
+}
+
+/** Pesapal's M-Pesa box is the 9-digit number next to +254, for example 726688456. */
+export function normalizePesapalPhone(raw: string): string {
+  let digits = raw.replace(/\D/g, "");
+  if (digits.startsWith("254") && digits.length >= 12) digits = digits.slice(3);
+  if (digits.startsWith("0")) digits = digits.slice(1);
+  return digits;
+}
+
+/**
+ * Pesapal's card form rejects an empty surname, street, city, or postal code.
+ * The store only collects name, email, and phone, so the Kenya sandbox
+ * merchant gets a complete billing record the buyer can still edit on Pesapal.
+ */
+export function pesapalBillingAddress(input: {
+  email: string;
+  phone: string;
+  fullName: string;
+}): PesapalBillingAddress {
+  const { firstName, lastName } = splitBuyerName(input.fullName);
+  return {
+    email_address: input.email,
+    phone_number: normalizePesapalPhone(input.phone),
+    country_code: "KE",
+    first_name: firstName,
+    last_name: lastName || firstName,
+    line_1: "Nairobi",
+    city: "Nairobi",
+    postal_code: "00100",
+    zip_code: "00100",
+  };
 }

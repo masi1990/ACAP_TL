@@ -5,19 +5,30 @@ import { cn } from "@/lib/utils";
 
 export function DeskTabs({
   tabs,
+  activeId,
+  onSelect,
+  syncHash = true,
 }: {
   tabs: { id: string; label: string; content: ReactNode }[];
+  /** When set, the parent owns which tab is open. */
+  activeId?: string;
+  onSelect?: (id: string) => void;
+  /** Nested tabs leave the page hash to the outer tab list. */
+  syncHash?: boolean;
 }) {
-  const [active, setActive] = useState(tabs[0]?.id || "");
+  const [internal, setInternal] = useState(tabs[0]?.id || "");
+  const active = activeId ?? internal;
 
   useEffect(() => {
+    if (!syncHash || activeId != null) return;
     const hash = window.location.hash.replace("#", "");
-    if (tabs.some((tab) => tab.id === hash)) setActive(hash);
-  }, [tabs]);
+    if (tabs.some((tab) => tab.id === hash)) setInternal(hash);
+  }, [tabs, activeId, syncHash]);
 
   function select(id: string) {
-    setActive(id);
-    window.history.replaceState(null, "", `#${id}`);
+    if (activeId == null) setInternal(id);
+    onSelect?.(id);
+    if (syncHash) window.history.replaceState(null, "", `#${id}`);
   }
 
   const current = tabs.find((tab) => tab.id === active) || tabs[0];

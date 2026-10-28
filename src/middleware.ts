@@ -12,14 +12,25 @@ const PUBLIC_API_PREFIXES = [
   "/api/store/preview",
   "/api/store/preview-data",
   "/api/store/checkout",
+  "/api/store/cart",
   "/api/store/download",
+  "/api/store/free",
   "/api/store/pesapal",
   "/api/registry",
+  "/api/analytics",
   "/api/certificates",
   "/api/auth/login",
+  "/api/auth/register",
+  "/api/auth/forgot-password",
+  "/api/auth/reset-password",
   "/api/chain/complaints",
   "/api/auth/accept-invite",
   "/api/jobs/dispatch",
+  "/api/catalogue/export",
+  "/api/library/options",
+  "/api/library/register",
+  "/api/library/standard-requests",
+  "/api/library/release",
 ];
 
 function isPublicApi(pathname: string) {
@@ -35,6 +46,7 @@ function isPublicLocalePath(pathname: string) {
   const suffix = rest ? `/${rest}` : "";
   if (suffix === "/certificates" || suffix.startsWith("/certificates/")) return true;
   if (suffix === "/invite" || suffix.startsWith("/invite/")) return true;
+  if (suffix === "/library" || suffix.startsWith("/library/")) return true;
   if (suffix === "/api/store/download") return true;
   // Exact public page match (no nested public paths except store query overlays)
   return (PUBLIC_PATH_SUFFIXES as readonly string[]).some((p) => {
@@ -83,7 +95,9 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(login);
   }
 
-  return NextResponse.next();
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set("x-pathname", pathname);
+  return NextResponse.next({ request: { headers: requestHeaders } });
 }
 
 export const config = {

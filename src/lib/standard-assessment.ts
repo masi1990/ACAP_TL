@@ -17,6 +17,16 @@ export type AssessmentDraft = {
 type MachineLike = {
   fullText?: string;
   requirements?: Array<{ id?: string; clause?: string; text?: string }>;
+  /** Clauses an admin added after the machine pack skipped them. Always included. */
+  manualRequirements?: Array<{
+    id?: string;
+    clause?: string;
+    heading?: string;
+    text?: string;
+    testMethod?: string;
+    kind?: "clause" | "table";
+    section?: string;
+  }>;
   clauses?: Array<{ number?: string; title?: string; body?: string }>;
   standard?: { designation?: string };
 };
@@ -122,6 +132,55 @@ function parseTable(lines: string[], start: number, clause: string) {
     rows.push({ parameter, limit, method });
   }
   return { title, rows, next: i, clause };
+}
+
+/** Numeric clause order: 4.1.2 before 4.1.10, 4.1.2(a) after 4.1.2, annexes after the body. */
+export function clauseRank(clause: string): number[] | null {
+  const raw = clause.trim();
+  const numbered = raw.match(/^(\d+(?:\.\d+)*)(?:\s*\(?([a-z])\)?)?/i);
+  if (numbered && /^\d/.test(raw)) {
+    const nums = numbered[1].split(".").map((part) => Number(part));
+    if (numbered[2]) nums.push(numbered[2].toLowerCase().charCodeAt(0));
+    return nums;
+  }
+  const annex = raw.match(/^annex\s+([a-z])(?:\.(\d+(?:\.\d+)*))?(?:\s*\(?([a-z])\)?)?/i);
+  if (annex) {
+    const nums = [10000 + (annex[1].toUpperCase().charCodeAt(0) - 64)];
+    if (annex[2]) nums.push(...annex[2].split(".").map((part) => Number(part)));
+    if (annex[3]) nums.push(annex[3].toLowerCase().charCodeAt(0));
+    return nums;
+  }
+  const annexSub = raw.match(/^([A-Z])\.(\d+(?:\.\d+)*)(?:\s*\(?([a-z])\)?)?$/);
+  if (annexSub) {
+    const nums = [10000 + (annexSub[1].charCodeAt(0) - 64), ...annexSub[2].split(".").map((part) => Number(part))];
+    if (annexSub[3]) nums.push(annexSub[3].toLowerCase().charCodeAt(0));
+    return nums;
+  }
+  return null;
+}
+
+function compareRanks(left: number[], right: number[]) {
+  const len = Math.max(left.length, right.length);
+  for (let i = 0; i < len; i++) {
+    const a = left[i] ?? -1;
+    const b = right[i] ?? -1;
+    if (a !== b) return a - b;
+  }
+  return 0;
+}
+
+/** Index where `clause` belongs among existing clause numbers. Unnumbered rows are left in place. */
+export function clauseInsertIndex(clauses: string[], clause: string) {
+  const key = clauseRank(clause);
+  if (!key) return clauses.length;
+  const numeric = key[0] < 10000;
+  for (let i = 0; i < clauses.length; i++) {
+    const existing = clauseRank(clauses[i]);
+    if (!existing) continue;
+    if (numeric && existing[0] >= 10000) continue;
+    if (compareRanks(existing, key) > 0) return i;
+  }
+  return clauses.length;
 }
 
 export function extractAssessmentDrafts(machine: MachineLike): AssessmentDraft[] {
@@ -247,41 +306,80 @@ export function extractAssessmentDrafts(machine: MachineLike): AssessmentDraft[]
     });
   }
 
-  if (drafts.length > 0) return drafts;
+  if (drafts.length === 0) {
+    const fallback = machine.requirements?.length
+      ? machine.requirements
+      : (machine.clauses || []).map((c) => ({
+          id: c.number,
+          clause: c.number,
+          text: `${c.title || ""}\n${c.body || ""}`.trim(),
+        }));
 
-  const fallback = machine.requirements?.length
-    ? machine.requirements
-    : (machine.clauses || []).map((c) => ({
-        id: c.number,
-        clause: c.number,
-        text: `${c.title || ""}\n${c.body || ""}`.trim(),
-      }));
-
-  fallback.forEach((row, index) => {
-    const text = String(row.text || "").trim();
-    if (!text) return;
-    add({
-      itemKey: `fallback:${row.id || row.clause || index}`,
-      section: "Standard requirements",
-      clause: String(row.clause || ""),
-      heading: "Requirement",
-      text,
-      testMethod: methodOf(text),
-      kind: "clause",
+    fallback.forEach((row, index) => {
+      const text = String(row.text || "").trim();
+      if (!text) return;
+      add({
+        itemKey: `fallback:${row.id || row.clause || index}`,
+        section: "Standard requirements",
+        clause: String(row.clause || ""),
+        heading: "Requirement",
+        text,
+        testMethod: methodOf(text),
+        kind: "clause",
+      });
     });
-  });
 
-  if (drafts.length === 0 && fullText.trim()) {
-    add({
-      itemKey: "fallback:full",
-      section: "Standard text",
-      clause: "",
-      heading: machine.standard?.designation || "Standard",
-      text: fullText.trim(),
-      testMethod: "",
-      kind: "clause",
+    if (drafts.length === 0 && fullText.trim()) {
+      add({
+        itemKey: "fallback:full",
+        section: "Standard text",
+        clause: "",
+        heading: machine.standard?.designation || "Standard",
+        text: fullText.trim(),
+        testMethod: "",
+        kind: "clause",
+      });
+    }
+  }
+
+  const manuals: AssessmentDraft[] = [];
+  for (const row of machine.manualRequirements || []) {
+    const text = String(row.text || "").trim();
+    const heading = String(row.heading || "").trim();
+    if (!text && !heading) continue;
+    const clause = String(row.clause || "").trim();
+    const kind = row.kind === "table" ? "table" : "clause";
+    const itemKey = `manual:${row.id || clause || heading.slice(0, 24)}`;
+    if (seen.has(itemKey)) continue;
+    seen.add(itemKey);
+    const title = heading || text;
+    manuals.push({
+      itemKey,
+      section: `${clause} ${title}`.replace(/\s+/g, " ").trim() || title,
+      clause,
+      heading: heading || (kind === "table" ? clause || "Requirement" : ""),
+      text: text || heading,
+      testMethod: String(row.testMethod || "").trim() || methodOf(`${heading} ${text}`),
+      kind,
+      sortOrder: 0,
     });
   }
+  manuals.sort((a, b) => {
+    const left = clauseRank(a.clause);
+    const right = clauseRank(b.clause);
+    if (left && right) return compareRanks(left, right);
+    return a.clause.localeCompare(b.clause);
+  });
+  for (const manual of manuals) {
+    const idx = clauseInsertIndex(
+      drafts.map((draft) => draft.clause),
+      manual.clause,
+    );
+    drafts.splice(idx, 0, manual);
+  }
+  drafts.forEach((draft, index) => {
+    draft.sortOrder = index;
+  });
 
   return drafts;
 }
