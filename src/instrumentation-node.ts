@@ -12,6 +12,7 @@ export async function startNotificationDispatcher() {
       console.error("notification dispatch failed", safeMailError(err));
     });
   };
-  tick();
+  // Defer the first poll so boot is not blocked on a slow/down database.
+  setTimeout(tick, 30_000);
   globalKey.__acapNotifyTimer = setInterval(tick, 5 * 60 * 1000);
 }

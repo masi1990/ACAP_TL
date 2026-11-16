@@ -24,7 +24,7 @@ type Quote = {
 };
 
 const field =
-  "flex h-12 w-full rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 text-base text-[var(--ink)] placeholder:text-[var(--muted)]";
+  "flex h-12 w-full rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 text-base text-[var(--ink)]";
 
 function lineKey(catalogItemId: string, editionLocale: string) {
   return `${catalogItemId}:${editionLocale}`;

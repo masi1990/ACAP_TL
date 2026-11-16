@@ -4,8 +4,63 @@ import { prisma } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { isLocale, type Locale } from "@/lib/i18n";
 import { logLibraryActivity, userLibraryView } from "@/lib/library";
-import { publishedLocales } from "@/lib/standard-kinds";
+import { standardKindOrNull, publishedLocales } from "@/lib/standard-kinds";
+import { LibraryHoldings, type LibraryStandardRow } from "./library-standard-browser";
 import { StandardRequestForm } from "./standard-request-form";
+
+function titleFor(
+  standard: { titleEn: string; titleFr: string | null; titlePt: string | null; titleAr: string | null },
+  locale: Locale,
+) {
+  if (locale === "fr" && standard.titleFr) return standard.titleFr;
+  if (locale === "pt" && standard.titlePt) return standard.titlePt;
+  if (locale === "ar" && standard.titleAr) return standard.titleAr;
+  return standard.titleEn;
+}
+
+function libraryRow(standard: {
+  id: string;
+  designation: string;
+  titleEn: string;
+  titleFr: string | null;
+  titlePt: string | null;
+  titleAr: string | null;
+  kind: string;
+  technicalCommittee: {
+    id: string;
+    code: string;
+    name: string;
+    scope: string;
+    secretariat: { iso2: string; name: string } | null;
+    sector: { id: string; code: string; name: string };
+  } | null;
+  versions: Array<{ languageFiles: Array<{ locale: string }>; authoritativeLocale: string; sourcePdfUri: string | null }>;
+}, locale: Locale): LibraryStandardRow[] {
+  const version = standard.versions[0];
+  if (!version) return [];
+  const committee = standard.technicalCommittee;
+  return [
+    {
+      id: standard.id,
+      designation: standard.designation,
+      title: titleFor(standard, locale),
+      kind: standardKindOrNull(standard.kind) || standard.kind || "PRODUCT",
+      sectorId: committee?.sector.id || "unassigned",
+      sectorCode: committee?.sector.code || "",
+      sectorName: committee?.sector.name || "Not yet classified",
+      committeeId: committee?.id || "unassigned",
+      committeeCode: committee?.code || "",
+      committeeName: committee?.name || "Not yet classified",
+      committeeScope: committee?.scope || "",
+      secretariatName: committee?.secretariat?.name || "",
+      secretariatIso2: committee?.secretariat?.iso2 || "",
+      languages: publishedLocales(version.languageFiles, version.authoritativeLocale, version.sourcePdfUri).map((code) => ({
+        code,
+        href: `/api/library/standards/${standard.id}/file?lang=${code}`,
+      })),
+    },
+  ];
+}
 
 export default async function LibraryPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale: raw } = await params;
@@ -46,6 +101,7 @@ export default async function LibraryPage({ params }: { params: Promise<{ locale
       where: { versions: { some: { publicationStatus: "PUBLISHED" } } },
       orderBy: { designation: "asc" },
       include: {
+        technicalCommittee: { include: { sector: true, secretariat: true } },
         versions: {
           where: { publicationStatus: "PUBLISHED" },
           orderBy: { year: "desc" },
@@ -80,31 +136,11 @@ export default async function LibraryPage({ params }: { params: Promise<{ locale
       ) : null}
       {!view.access.length ? (
         <p className="mt-6 text-sm text-[var(--muted)]">You do not have library access yet.</p>
+      ) : visible.length === 0 ? (
+        <p className="mt-6 text-sm text-[var(--muted)]">No standards are released to you yet.</p>
       ) : (
-        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {visible.map((standard) => {
-            const version = standard.versions[0];
-            if (!version) return null;
-            const languages = publishedLocales(version.languageFiles, version.authoritativeLocale, version.sourcePdfUri);
-            return (
-              <article key={standard.id} className="rounded-xl border border-[var(--line)] p-4">
-                <p className="font-mono text-sm">{standard.designation}</p>
-                <h2 className="font-medium">{standard.titleEn}</h2>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {languages.map((lang) => (
-                    <a
-                      key={lang}
-                      className="rounded-md border border-[var(--line)] px-2 py-1 text-xs"
-                      href={`/api/library/standards/${standard.id}/file?lang=${lang}`}
-                    >
-                      Download {lang.toUpperCase()}
-                    </a>
-                  ))}
-                </div>
-              </article>
-            );
-          })}
-          {visible.length === 0 ? <p className="text-sm text-[var(--muted)]">No standards are released to you yet.</p> : null}
+        <div className="mt-6">
+          <LibraryHoldings locale={locale} rows={visible.flatMap((standard) => libraryRow(standard, locale))} />
         </div>
       )}
       <StandardRequestForm locale={locale} signedInEmail={session.user.email} signedInName={session.user.name} />

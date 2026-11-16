@@ -13,61 +13,80 @@ except ImportError:
     import fitz  # type: ignore
 from PIL import Image, ImageDraw, ImageFilter
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from standard_text import (  # noqa: E402
+    ARABIC_CLAUSE2,
+    CLAUSE2_PHRASES,
+    fold_latin,
+    has_clause2_heading,
+    has_specifying_sentence,
+    is_scope_heading_line,
+    is_toc_line,
+    is_toc_page,
+    logical_line,
+)
+
+CLAUSE2_NEEDLES = (
+    "Normative references",
+    "Normative reference",
+    "Références normatives",
+    "Referências normativas",
+    "Referencias normativas",
+    "المراجع المعيارية",
+    "المراجع القياسية",
+)
+
 
 def find_clause2_y(page) -> float | None:
-    hits = page.search_for("Normative")
-    for h in hits:
-        # Prefer heading near left margin on a "2 … Normative" line
-        if h.x0 < 200:
-            return float(h.y0)
-    # Fallback: search text blocks
-    for b in page.get_text("dict").get("blocks", []):
-        if b.get("type") != 0:
+    """Y just above Clause 2 (normative references), in any published language."""
+    ys: list[float] = []
+    number_ys: list[float] = []
+    for needle in CLAUSE2_NEEDLES:
+        for hit in page.search_for(needle):
+            if hit.x0 < 420:
+                ys.append(float(hit.y0))
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type") != 0:
             continue
-        for line in b.get("lines", []):
-            text = " ".join(s["text"] for s in line.get("spans", [])).strip()
-            if text.lower().startswith("2") and "normative" in text.lower():
-                return float(line["bbox"][1])
-    return None
+        for line in block.get("lines", []):
+            text = " ".join(span["text"] for span in line.get("spans", [])).strip()
+            if not text or is_toc_line(text):
+                continue
+            logical = logical_line(text)
+            folded = fold_latin(logical)
+            y0 = float(line["bbox"][1])
+            if re.fullmatch(r"2(?:\.0)?", folded):
+                number_ys.append(y0)
+            elif any(phrase in folded for phrase in CLAUSE2_PHRASES) or any(phrase in logical for phrase in ARABIC_CLAUSE2):
+                ys.append(y0)
+    if not ys:
+        return None
+    cut = min(ys)
+    above = [y for y in number_ys if cut - 80 <= y < cut]
+    if above:
+        cut = min(above)
+    return cut
 
 
-def find_scope_page(doc) -> int:
-    """Locate the body page that opens Clause 1 Scope (not the TOC listing)."""
+def find_scope_page(doc) -> int | None:
+    """Body page that opens Clause 1. None when the scope heading cannot be found."""
     scored: list[tuple[int, int]] = []
     for i, page in enumerate(doc):
         text = page.get_text("text")
-        lower = text.lower()
-        is_toc = (
-            "table of contents" in lower
-            or re.search(r"(?m)^\s*contents\s*$", text) is not None
-            or (text.count("Scope") >= 1 and "This African" not in text and len(text) < 1200 and text.count("\n") > 20)
-        )
-        has_spec_sentence = (
-            "This African Standard specifies" in text
-            or "This African standard specifies" in text
-            or "specifies the requirements" in lower
-        )
-        # Body page: real Scope prose, not a TOC line item
-        if has_spec_sentence and "Scope" in text:
-            score = 100 + (10 if "Normative" in text else 0)
-            scored.append((score, i))
+        if is_toc_page(text):
             continue
-        if is_toc:
+        heading = any(is_scope_heading_line(line) for line in text.splitlines())
+        sentence = has_specifying_sentence(text)
+        if not heading and not sentence:
             continue
-        if (
-            re.search(r"(?m)^\s*1\s*$", text)
-            and re.search(r"(?m)^\s*Scope\s*$", text)
-            and has_spec_sentence
-        ):
-            scored.append((80, i))
-    if scored:
-        scored.sort(reverse=True)
-        return scored[0][1]
-    for i, page in enumerate(doc):
-        text = page.get_text("text")
-        if "This African Standard specifies" in text or "This African standard specifies" in text:
-            return i
-    return min(6, max(0, len(doc) - 1))
+        score = (100 if heading and sentence else 70 if heading else 40) + (
+            10 if has_clause2_heading(text) else 0
+        )
+        scored.append((score, i))
+    if not scored:
+        return None
+    scored.sort(reverse=True)
+    return scored[0][1]
 
 
 def render(page, zoom: float = 2.0) -> Image.Image:
@@ -90,23 +109,42 @@ def generate_public_preview(doc, out_dir: Path, zoom: float = 2.0) -> dict:
     for i, page in enumerate(doc):
         n = i + 1
         img = render(page, zoom)
-        label = f"Page {n}"
-        if i == 0:
-            label = "Cover"
-        access = "locked"
-        note = None
+        label = "Cover" if i == 0 else f"Page {n}"
         image_name = f"page-{n:02d}.png"
+        before_scope = scope_idx is not None and i < scope_idx
 
-        if i < scope_idx:
-            access = "free"
+        if before_scope:
             img.save(out_dir / image_name, "PNG")
-        elif i == scope_idx:
+            pages_meta.append(
+                {
+                    "n": n,
+                    "label": label,
+                    "access": "free",
+                    "image": image_name,
+                    "note": None,
+                }
+            )
+            continue
+
+        if i == scope_idx:
             cut_y = find_clause2_y(page)
-            if cut_y is not None:
-                crop_h = max(80, int(cut_y * zoom) - 10)
+            blur_locked(img).save(out_dir / image_name, "PNG")
+            if cut_y is None and has_clause2_heading(page.get_text("text")):
+                pages_meta.append(
+                    {
+                        "n": n,
+                        "label": f"Page {n} (Clause 2+ locked)",
+                        "access": "locked",
+                        "image": image_name,
+                        "note": "Clause 2 and later text are locked.",
+                    }
+                )
+                continue
+            if cut_y is None:
+                scope_img = img
             else:
-                crop_h = int(img.height * 0.35)
-            scope_img = img.crop((0, 0, img.width, min(crop_h, img.height)))
+                crop_h = max(80, int(cut_y * zoom) - 10)
+                scope_img = img.crop((0, 0, img.width, min(crop_h, img.height)))
             canvas = Image.new("RGB", (img.width, scope_img.height + 90), (255, 255, 255))
             canvas.paste(scope_img, (0, 0))
             draw = ImageDraw.Draw(canvas)
@@ -116,8 +154,6 @@ def generate_public_preview(doc, out_dir: Path, zoom: float = 2.0) -> dict:
             )
             scope_name = f"page-{n:02d}-scope-only.png"
             canvas.save(out_dir / scope_name, "PNG")
-            # Locked full page (includes clause 2+) heavily blurred — not used as free
-            blur_locked(img).save(out_dir / image_name, "PNG")
             pages_meta.append(
                 {
                     "n": n,
@@ -134,27 +170,27 @@ def generate_public_preview(doc, out_dir: Path, zoom: float = 2.0) -> dict:
                     "label": f"Page {n} (Clause 2+ locked)",
                     "access": "locked",
                     "image": image_name,
-                    "note": "Clause 2 Normative references and later text are locked.",
+                    "note": "Clause 2 and later text are locked.",
                 }
             )
             continue
-        else:
-            blur_locked(img).save(out_dir / image_name, "PNG")
 
+        blur_locked(img).save(out_dir / image_name, "PNG")
         pages_meta.append(
             {
-                "n": n if i != scope_idx else n,
-                "label": label if access == "free" else f"{label} (locked)",
-                "access": access,
+                "n": n,
+                "label": f"{label} (locked)",
+                "access": "locked",
                 "image": image_name,
-                "note": note,
+                "note": None,
             }
         )
 
     return {
         "pageCount": len(doc),
-        "scopePage": scope_idx + 1,
+        "scopePage": 0 if scope_idx is None else scope_idx + 1,
         "mode": "public",
+        "cutoff": "clause-1-i18n",
         "pages": pages_meta,
     }
 

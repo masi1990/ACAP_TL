@@ -26,6 +26,7 @@ model MemberState {
   libraryAccessRequests LibraryAccessRequest[]
   libraryStandardRequests LibraryStandardRequest[]
   libraryReleases LibraryRelease[]
+  secretariatCommittees TechnicalCommittee[]
 }
 
 model Rec {
@@ -405,15 +406,21 @@ model Sector {
 
 /// A technical committee belongs to one sector and owns many standards.
 model TechnicalCommittee {
-  id        String     @id @default(cuid())
-  code      String     @unique
-  name      String
-  sectorId  String
-  sector    Sector     @relation(fields: [sectorId], references: [id], onDelete: Restrict)
-  standards Standard[]
-  createdAt DateTime   @default(now())
+  id                       String       @id @default(cuid())
+  code                     String       @unique
+  name                     String
+  /// What this committee is responsible for.
+  scope                    String       @default("")
+  sectorId                 String
+  sector                   Sector       @relation(fields: [sectorId], references: [id], onDelete: Restrict)
+  /// African country that holds the secretariat / leads the committee.
+  secretariatMemberStateId String?
+  secretariat              MemberState? @relation(fields: [secretariatMemberStateId], references: [id], onDelete: SetNull)
+  standards                Standard[]
+  createdAt                DateTime     @default(now())
 
   @@index([sectorId])
+  @@index([secretariatMemberStateId])
 }
 
 model Standard {

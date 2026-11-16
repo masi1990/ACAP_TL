@@ -10,14 +10,21 @@ export async function POST(req: NextRequest) {
   const code = String(body.code || "").trim().toUpperCase();
   const name = String(body.name || "").trim();
   const sectorId = String(body.sectorId || "").trim();
+  const scope = String(body.scope || "").trim();
   if (!code || !name || !sectorId) {
     return NextResponse.json({ error: "sector, code, and name are required" }, { status: 400 });
   }
   const sector = await prisma.sector.findUnique({ where: { id: sectorId } });
   if (!sector) return NextResponse.json({ error: "Choose a sector" }, { status: 400 });
+  const secretariatMemberStateId = await secretariatId(body.secretariatMemberStateId);
+  if (secretariatMemberStateId === false) {
+    return NextResponse.json({ error: "Choose an African country for the secretariat" }, { status: 400 });
+  }
   const existing = await prisma.technicalCommittee.findUnique({ where: { code } });
   if (existing) return NextResponse.json({ error: "Committee code already exists" }, { status: 409 });
-  const row = await prisma.technicalCommittee.create({ data: { code, name, sectorId } });
+  const row = await prisma.technicalCommittee.create({
+    data: { code, name, sectorId, scope, secretariatMemberStateId },
+  });
   await appendAuditEvent({
     actorUserId: auth.session!.userId,
     action: "COMMITTEE_CREATE",
@@ -26,4 +33,11 @@ export async function POST(req: NextRequest) {
     after: row,
   });
   return NextResponse.json({ ok: true, row }, { status: 201 });
+}
+
+async function secretariatId(raw: unknown): Promise<string | null | false> {
+  const id = String(raw || "").trim();
+  if (!id) return null;
+  const country = await prisma.memberState.findUnique({ where: { id } });
+  return country ? country.id : false;
 }

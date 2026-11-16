@@ -35,6 +35,16 @@ export function standardKindOrNull(raw: unknown): string | null {
   return KIND_VALUES.has(mapped) ? mapped : null;
 }
 
+/** Canonical kind plus any older stored values that map to it. */
+export function standardKindQuery(kind: unknown): string[] {
+  const canonical = standardKindOrNull(kind);
+  if (!canonical) return [];
+  const legacy = Object.entries(LEGACY_KINDS)
+    .filter(([, mapped]) => mapped === canonical)
+    .map(([value]) => value);
+  return [canonical, ...legacy];
+}
+
 export function standardKindLabel(kind: string, locale: Locale = "en"): string {
   const mapped = LEGACY_KINDS[kind] || kind;
   const match = STANDARD_KINDS.find((item) => item.value === mapped);

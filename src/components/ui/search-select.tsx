@@ -71,7 +71,9 @@ export function SearchSelect({
         }}
         className="flex h-10 w-full items-center justify-between gap-2 rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 text-left text-sm"
       >
-        <span className={cn("truncate", !selected && "text-[var(--muted)]")}>{selected?.label || placeholder}</span>
+        <span className={cn("truncate", !selected && "text-xs font-normal text-[var(--placeholder)]")}>
+          {selected?.label || placeholder}
+        </span>
         <ChevronDown className="h-4 w-4 shrink-0 text-[var(--muted)]" aria-hidden />
       </button>
       {open && (

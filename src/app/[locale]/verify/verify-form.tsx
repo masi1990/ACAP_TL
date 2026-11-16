@@ -18,7 +18,7 @@ export function VerifyForm({ locale, initialPin }: { locale: Locale; initialPin:
           defaultValue={initialPin}
           placeholder="PIN-XXXXXXXX"
           required
-          className="flex h-10 w-full rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--ink)] placeholder:text-[var(--muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+          className="flex h-10 w-full rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
         />
       </div>
       <button

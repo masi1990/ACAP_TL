@@ -1,6 +1,5 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   // Nodemailer uses Node sockets. Keep it out of the server bundle.
   serverExternalPackages: ["nodemailer"],
   // Dev hydration/HMR is blocked for hosts not listed here (Next 16+).

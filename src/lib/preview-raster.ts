@@ -29,8 +29,12 @@ type Manifest = {
   pageCount: number;
   scopePage: number;
   mode?: "public" | "full";
+  /** Public packs built with multilingual Clause 1 detection. */
+  cutoff?: string;
   pages: ManifestPage[];
 };
+
+const PUBLIC_CUTOFF = "clause-1-i18n";
 
 /** Resolve a public URI (/uploads/… or /standards/…) to a filesystem path. */
 export function publicUriToFs(uri: string): string | null {
@@ -54,7 +58,17 @@ export async function ensureStandardPreviewRasters(opts: {
   const outDir = path.join(process.cwd(), "public", outRel);
   const manifestPath = path.join(outDir, "manifest.json");
 
-  if (!(await exists(manifestPath))) {
+  let needsRebuild = !(await exists(manifestPath));
+  if (!needsRebuild) {
+    try {
+      const existing = JSON.parse(await readFile(manifestPath, "utf8")) as Manifest;
+      if (existing.cutoff !== PUBLIC_CUTOFF) needsRebuild = true;
+    } catch {
+      needsRebuild = true;
+    }
+  }
+
+  if (needsRebuild) {
     await mkdir(outDir, { recursive: true });
     const script = path.join(process.cwd(), "scripts", "generate-standard-preview.py");
     await execFileAsync(await resolvePython(), [script, pdfFs, outDir], {
@@ -126,16 +140,18 @@ export function tocFromFullText(fullText: string | undefined, fallback?: Preview
   const entries: PreviewTocEntry[] = [];
   const seen = new Set<string>();
 
-  // Prefer dotted TOC lines: "1 Scope .... 1" / "2 Normative references …"
+  // TOC lines may put the clause number above the title: "1\nScope .... 4" or "1 Scope .... 4".
+  // The page number stays on the title line so a later clause number is not treated as a page.
   const tocLine =
-    /(?:^|\n)\s*(\d+(?:\.\d+)*)\s+([A-Za-z][A-Za-z][^\n.]{2,70}?)\s*(?:\.{2,}|\u2026|\s{2,})\s*\d+/g;
+    /(?:^|\n)\s*(\d+(?:\.\d+)*)(?:[ \t]+|\s*\n\s*)(\p{L}[^\n.]{2,80}?)\s*(?:\.{2,}|\u2026|[ \t]{2,})[ \t]*\d+[ \t]*(?=\n|$)/gu;
   let m: RegExpExecArray | null;
   while ((m = tocLine.exec(fullText)) && entries.length < 24) {
     const number = m[1];
     const title = m[2].replace(/\s+/g, " ").trim();
     if (seen.has(number)) continue;
-    if (!/^[A-Za-z]/.test(title)) continue;
+    if (!/^\p{L}/u.test(title)) continue;
     if (/^\d+(\s*[–-]\s*\d+)?$/.test(title)) continue;
+    if (/^20\d{2}$/.test(number)) continue;
     seen.add(number);
     entries.push({
       number,
@@ -145,14 +161,16 @@ export function tocFromFullText(fullText: string | undefined, fallback?: Preview
     });
   }
 
-  // Fallback: stacked "1\nScope" headings with alphabetic titles only
+  // Fallback: stacked "1\nScope" / "1\nChamp d'application" headings when no dotted contents exist
   if (entries.length < 3) {
-    const stacked = /(?:^|\n)\s*(\d+)\s*\n\s*([A-Za-z][A-Za-z /,&-]{2,60})/g;
+    const stacked = /(?:^|\n)\s*(\d+(?:\.\d+)*)[ \t]*\n[ \t]*(\p{L}[\p{L} /,&'’()-]{2,60})[ \t]*(?=\n|$)/gu;
     while ((m = stacked.exec(fullText)) && entries.length < 20) {
       const number = m[1];
       const title = m[2].trim();
       if (seen.has(number)) continue;
-      if (!/^[A-Za-z]/.test(title)) continue;
+      if (!/^\p{L}/u.test(title)) continue;
+      if (title.length > 60) continue;
+      if (/^20\d{2}$/.test(number)) continue;
       if (/\d/.test(title) && title.length < 8) continue;
       seen.add(number);
       entries.push({
@@ -165,7 +183,7 @@ export function tocFromFullText(fullText: string | undefined, fallback?: Preview
   }
 
   const isJunkTitle = (title: string) =>
-    !/^[A-Za-z]/.test(title) ||
+    !/^\p{L}/u.test(title) ||
     title.length < 4 ||
     /^[\d\s–—.\-]+$/.test(title) ||
     /\d+\s*[–—-]\s*\d+/.test(title);
@@ -201,7 +219,7 @@ export function tocFromMachineClauses(
       pageHint: "—",
       includedInPreview: String(c.number) === "1",
     }))
-    .filter((e) => /^[A-Za-z]/.test(e.title) && e.title.length >= 4 && !/\d+\s*[–—-]\s*\d+/.test(e.title));
+    .filter((e) => /^\p{L}/u.test(e.title) && e.title.length >= 4 && !/\d+\s*[–—-]\s*\d+/.test(e.title));
   if (list.length < 2) return fromText;
   // Prefer fullText TOC when clause titles look like prose fragments
   const junk = list.filter((e) => e.title.length > 60 || / of this | may contain /i.test(e.title)).length;

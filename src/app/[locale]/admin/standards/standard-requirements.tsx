@@ -229,7 +229,7 @@ export function StandardRequirements({
                 placeholder="The clause text the pack missed"
                 required
                 rows={4}
-                className="flex w-full rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--ink)] placeholder:text-[var(--muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                className="flex w-full rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
               />
             </label>
             <div className="grid gap-3 sm:grid-cols-2">
