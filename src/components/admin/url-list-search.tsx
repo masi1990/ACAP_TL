@@ -9,6 +9,9 @@ import { listHref } from "@/lib/list-page";
 export function UrlListSearch({
   pathname,
   hash,
+  param = "q",
+  pageParam = "page",
+  keep,
   initial,
   placeholder,
   from,
@@ -17,7 +20,13 @@ export function UrlListSearch({
 }: {
   pathname: string;
   /** Tab id to stay on after the URL changes (no leading #). */
-  hash: string;
+  hash?: string;
+  /** Query-string key for the search text (several lists on one page use different keys). */
+  param?: string;
+  /** Query-string key for this list's page number. */
+  pageParam?: string;
+  /** Other query-string values to carry over unchanged. */
+  keep?: Record<string, string | undefined>;
   initial: string;
   placeholder?: string;
   from: number;
@@ -36,7 +45,8 @@ export function UrlListSearch({
   );
 
   function go(next: string) {
-    router.replace(`${listHref(pathname, 1, { q: next.trim() })}#${hash}`, { scroll: false });
+    const href = listHref(pathname, 1, { ...keep, [param]: next.trim() }, pageParam);
+    router.replace(hash ? `${href}#${hash}` : href, { scroll: false });
   }
 
   function onChange(next: string) {

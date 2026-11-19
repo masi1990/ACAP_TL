@@ -14,12 +14,17 @@ export function listPage(raw: string | undefined, total: number, pageSize = LIST
   };
 }
 
-export function listHref(pathname: string, page: number, query: Record<string, string | undefined> = {}) {
+export function listHref(
+  pathname: string,
+  page: number,
+  query: Record<string, string | undefined> = {},
+  pageParam = "page",
+) {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
     if (value) params.set(key, value);
   }
-  if (page > 1) params.set("page", String(page));
+  if (page > 1) params.set(pageParam, String(page));
   const qs = params.toString();
   return qs ? `${pathname}?${qs}` : pathname;
 }

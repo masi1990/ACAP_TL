@@ -9,6 +9,7 @@ import { adoptionRate, standardKindLabel } from "@/lib/standard-kinds";
 import { Badge } from "@/components/ui/badge";
 import { importedProductCountsByStandard } from "@/lib/imported-marks";
 import { ScopeReveal } from "@/components/scope-reveal";
+import { LinePager } from "@/components/line-pager";
 import { LookupForm, type LookupRec } from "./lookup-form";
 
 const PAGE_SIZE = 8;
@@ -247,6 +248,9 @@ export default async function LookupPage({
     options[0]?.codeDisplay ||
     "";
 
+  const listFrom = listTotal === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const listTo = Math.min(listTotal, page * PAGE_SIZE);
+
   function pageHref(nextPage: number) {
     const qs = new URLSearchParams();
     qs.set("rec", rec);
@@ -270,7 +274,10 @@ export default async function LookupPage({
         </p>
       </div>
 
-      <LookupForm locale={locale} initialRec={rec} initialCode={defaultCode} options={options} recs={recs} />
+      {/* The search stays in view while the standards and tariff result below scroll. */}
+      <div className="sticky top-0 z-20 -mx-1 bg-[var(--surface)] px-1 pb-3">
+        <LookupForm locale={locale} initialRec={rec} initialCode={defaultCode} options={options} recs={recs} />
+      </div>
 
       <div className="mt-8">
         {tariffPanel}
@@ -280,8 +287,9 @@ export default async function LookupPage({
             {searching ? "Applicable standards" : "African Standards"}
           </h2>
           <p className="text-sm text-[var(--muted)]">
-            {listTotal} standard{listTotal === 1 ? "" : "s"}
-            {listPageCount > 1 ? ` · page ${page} of ${listPageCount}` : ""}
+            {listTotal === 0
+              ? "0 standards"
+              : `Showing ${listFrom}–${listTo} of ${listTotal} standard${listTotal === 1 ? "" : "s"}`}
           </p>
         </div>
 
@@ -383,33 +391,14 @@ export default async function LookupPage({
           </div>
         )}
 
-        {listPageCount > 1 && (
-          <div className="mt-8 flex items-center justify-between gap-3">
-            {page > 1 ? (
-              <Link
-                href={pageHref(page - 1)}
-                className="inline-flex h-10 items-center rounded-md border border-[var(--line)] px-4 text-sm"
-              >
-                Prev
-              </Link>
-            ) : (
-              <span className="inline-flex h-10 items-center px-4 text-sm text-[var(--muted)]">Prev</span>
-            )}
-            <p className="text-sm text-[var(--muted)]">
-              Page {page} of {listPageCount}
-            </p>
-            {page < listPageCount ? (
-              <Link
-                href={pageHref(page + 1)}
-                className="inline-flex h-10 items-center rounded-md border border-[var(--line)] px-4 text-sm"
-              >
-                Next
-              </Link>
-            ) : (
-              <span className="inline-flex h-10 items-center px-4 text-sm text-[var(--muted)]">Next</span>
-            )}
-          </div>
-        )}
+        <div className="mt-8">
+          <LinePager
+            page={page}
+            pageCount={listPageCount}
+            prevHref={pageHref(page - 1)}
+            nextHref={pageHref(page + 1)}
+          />
+        </div>
       </div>
     </div>
   );

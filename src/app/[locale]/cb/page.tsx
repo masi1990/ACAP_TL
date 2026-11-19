@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Fragment } from "react";
 import { notFound } from "next/navigation";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { certificationDeskClientWhere, certificationDeskProductWhere, visibleClientProducts } from "@/lib/cb-scope";
@@ -21,6 +22,11 @@ import { DeskTabs } from "./desk-tabs";
 import { latestActors } from "@/lib/line-actor";
 import { ActorNote } from "@/components/actor-note";
 import { ApprovalActions } from "@/components/cb/approval-actions";
+import { withBasePath } from "@/lib/base-path";
+import { UrlListSearch } from "@/components/admin/url-list-search";
+import { LinePager } from "@/components/line-pager";
+import { listHref, listPage } from "@/lib/list-page";
+import { normalizeListQuery } from "@/lib/list-query";
 
 function orderedByMark<T extends { markScheme: string }>(rows: T[]) {
   return [...rows].sort((a, b) => Number(a.markScheme === "ECO") - Number(b.markScheme === "ECO"));
@@ -107,7 +113,58 @@ function companyStatusLabel(status: string) {
   return "Active";
 }
 
-export default async function CertificationDeskPage({ params }: { params: Promise<{ locale: string }> }) {
+type DeskSearchParams = {
+  cq?: string;
+  cpage?: string;
+  pq?: string;
+  ppage?: string;
+  kq?: string;
+  kpage?: string;
+};
+
+const productInclude = {
+  company: { include: { clientAccount: { include: { organization: true } } } },
+  standardLinks: { include: { standardVersion: { include: { standard: true } } } },
+  applications: {
+    include: {
+      coc: true,
+      labResults: true,
+      organization: true,
+      standardVersion: { include: { standard: true } },
+      assessmentItems: { include: { evidence: true }, orderBy: { sortOrder: "asc" } },
+      testDossier: true,
+      dossierAttachments: { orderBy: { uploadedAt: "asc" } },
+    },
+  },
+  variants: { include: { pin: true } },
+  clearances: { orderBy: { decidedAt: "desc" } },
+  inspections: { orderBy: { inspectedAt: "desc" } },
+} satisfies Prisma.ProductInclude;
+
+/** Every certification application on the product has a certificate. */
+const certifiedProductWhere: Prisma.ProductWhereInput = {
+  applications: { some: {}, every: { coc: { isNot: null } } },
+};
+
+function productSearch(q: string): Prisma.ProductWhereInput {
+  if (!q) return {};
+  return {
+    OR: [
+      { name: { contains: q, mode: "insensitive" } },
+      { commodity: { contains: q, mode: "insensitive" } },
+      { company: { clientAccount: { organization: { name: { contains: q, mode: "insensitive" } } } } },
+      { variants: { some: { pin: { is: { pinCode: { contains: q, mode: "insensitive" } } } } } },
+    ],
+  };
+}
+
+export default async function CertificationDeskPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ locale: string }>;
+  searchParams: Promise<DeskSearchParams>;
+}) {
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
   const locale = raw as Locale;
@@ -123,9 +180,56 @@ export default async function CertificationDeskPage({ params }: { params: Promis
   const cbIds = certificationBodyIds(user);
   const bodyRows = hub ? undefined : cbIds;
 
-  const [clients, bodies, products, versions, tariffs] = await Promise.all([
+  const sp = await searchParams;
+  const cq = normalizeListQuery(sp.cq);
+  const pq = normalizeListQuery(sp.pq);
+  const kq = normalizeListQuery(sp.kq);
+  const listPath = `/${locale}/cb`;
+
+  const clientScope: Prisma.OrganizationWhereInput = hub
+    ? { type: { in: ["MANUFACTURER", "IMPORTER"] } }
+    : certificationDeskClientWhere(cbIds);
+  const clientWhere: Prisma.OrganizationWhereInput = cq
+    ? {
+        AND: [
+          clientScope,
+          {
+            OR: [
+              { name: { contains: cq, mode: "insensitive" } },
+              { servicingCb: { is: { name: { contains: cq, mode: "insensitive" } } } },
+            ],
+          },
+        ],
+      }
+    : clientScope;
+  const productScope: Prisma.ProductWhereInput = hub ? {} : certificationDeskProductWhere(cbIds);
+  const openWhere: Prisma.ProductWhereInput = { AND: [productScope, { NOT: certifiedProductWhere }, productSearch(pq)] };
+  const certifiedWhere: Prisma.ProductWhereInput = { AND: [productScope, certifiedProductWhere, productSearch(kq)] };
+
+  const [clientTotal, openTotal, certifiedTotal] = await Promise.all([
+    prisma.organization.count({ where: clientWhere }),
+    prisma.product.count({ where: openWhere }),
+    prisma.product.count({ where: certifiedWhere }),
+  ]);
+  const clientListing = listPage(sp.cpage, clientTotal);
+  const openListing = listPage(sp.ppage, openTotal);
+  const certifiedListing = listPage(sp.kpage, certifiedTotal);
+
+  const carry: Record<keyof DeskSearchParams, string | undefined> = {
+    cq: cq || undefined,
+    pq: pq || undefined,
+    kq: kq || undefined,
+    cpage: clientListing.page > 1 ? String(clientListing.page) : undefined,
+    ppage: openListing.page > 1 ? String(openListing.page) : undefined,
+    kpage: certifiedListing.page > 1 ? String(certifiedListing.page) : undefined,
+  };
+  /** The other lists' search text and pages stay put while one list changes. */
+  const without = (...omit: (keyof DeskSearchParams)[]) =>
+    Object.fromEntries(Object.entries(carry).filter(([key]) => !omit.includes(key as keyof DeskSearchParams)));
+
+  const [clients, traderRows, bodies, openProducts, certifiedProducts, versions, tariffs] = await Promise.all([
     prisma.organization.findMany({
-      where: hub ? { type: { in: ["MANUFACTURER", "IMPORTER"] } } : certificationDeskClientWhere(cbIds),
+      where: clientWhere,
       include: {
         servicingCb: true,
         clientAccounts: {
@@ -143,6 +247,14 @@ export default async function CertificationDeskPage({ params }: { params: Promis
           },
         },
       },
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+      skip: clientListing.skip,
+      take: clientListing.take,
+    }),
+    // Names only, for the add and edit pickers; the table above pages the full rows.
+    prisma.organization.findMany({
+      where: clientScope,
+      select: { id: true, name: true, type: true, status: true, servicingCbId: true },
       orderBy: { name: "asc" },
     }),
     prisma.organization.findMany({
@@ -150,26 +262,18 @@ export default async function CertificationDeskPage({ params }: { params: Promis
       orderBy: { name: "asc" },
     }),
     prisma.product.findMany({
-      where: hub ? undefined : certificationDeskProductWhere(cbIds),
-      include: {
-        company: { include: { clientAccount: { include: { organization: true } } } },
-        standardLinks: { include: { standardVersion: { include: { standard: true } } } },
-        applications: {
-          include: {
-            coc: true,
-            labResults: true,
-            organization: true,
-            standardVersion: { include: { standard: true } },
-            assessmentItems: { include: { evidence: true }, orderBy: { sortOrder: "asc" } },
-            testDossier: true,
-            dossierAttachments: { orderBy: { uploadedAt: "asc" } },
-          },
-        },
-        variants: { include: { pin: true } },
-        clearances: { orderBy: { decidedAt: "desc" } },
-        inspections: { orderBy: { inspectedAt: "desc" } },
-      },
-      orderBy: { name: "asc" },
+      where: openWhere,
+      include: productInclude,
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+      skip: openListing.skip,
+      take: openListing.take,
+    }),
+    prisma.product.findMany({
+      where: certifiedWhere,
+      include: productInclude,
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+      skip: certifiedListing.skip,
+      take: certifiedListing.take,
     }),
     prisma.standardVersion.findMany({
       where: { standard: { kind: "PRODUCT" } },
@@ -207,13 +311,13 @@ export default async function CertificationDeskPage({ params }: { params: Promis
     value: line.id,
     label: `${line.codeDisplay}${line.rec ? ` · ${line.rec.code}` : ""}`,
   }));
-  const traderOptions = clients.map((client) => ({
+  const traderOptions = traderRows.map((client) => ({
     value: client.id,
     label: `${client.name} · ${client.type === "IMPORTER" ? "Importer" : "Manufacturer"}`,
   }));
   const servedClients = hub
-    ? clients
-    : clients.filter((client) => client.servicingCbId && cbIds.includes(client.servicingCbId));
+    ? traderRows
+    : traderRows.filter((client) => client.servicingCbId && cbIds.includes(client.servicingCbId));
   const activeTraderOptions = servedClients
     .filter((client) => client.status === "ACTIVE")
     .map((client) => ({
@@ -224,7 +328,7 @@ export default async function CertificationDeskPage({ params }: { params: Promis
   const soleCbId = cbIds.length === 1 ? cbIds[0] : "";
   const [clientActors, productActors] = await Promise.all([
     latestActors("Organization", clients.map((client) => client.id)),
-    latestActors("Product", products.map((product) => product.id)),
+    latestActors("Product", [...openProducts, ...certifiedProducts].map((product) => product.id)),
   ]);
   const columns = 8 + (canWriteProducts ? 1 : 0);
   const markOptions = [
@@ -237,10 +341,6 @@ export default async function CertificationDeskPage({ params }: { params: Promis
     { value: "suspended", label: "Suspended" },
     { value: "withdrawn", label: "Withdrawn" },
   ];
-  const fullyCertified = (product: (typeof products)[number]) =>
-    product.applications.length > 0 && product.applications.every((application) => application.coc);
-  const openProducts = products.filter((product) => !fullyCertified(product));
-  const certifiedProducts = products.filter((product) => fullyCertified(product));
 
   return (
     <main className="shell space-y-10 py-10">
@@ -284,11 +384,23 @@ export default async function CertificationDeskPage({ params }: { params: Promis
           <CrudForm
             searchable
             idPrefix="client-"
-            action="/api/cb/clients"
+            action={withBasePath("/api/cb/clients")}
             submitLabel="Add manufacturer or importer"
             fields={clientFields(countries, bodyOptions, pickBody, soleCbId)}
           />
         )}
+        <UrlListSearch
+          pathname={listPath}
+          hash="clients"
+          param="cq"
+          pageParam="cpage"
+          keep={without("cq", "cpage")}
+          initial={cq}
+          placeholder="Search client or certification body"
+          from={clientListing.from}
+          to={clientListing.to}
+          total={clientListing.total}
+        />
         <div className="panel overflow-x-auto">
           <table className="w-full min-w-[720px] text-left text-sm">
             <thead>
@@ -306,7 +418,7 @@ export default async function CertificationDeskPage({ params }: { params: Promis
               {clients.length === 0 && (
                 <tr>
                   <td className="px-4 py-6 text-[var(--muted)]" colSpan={canWriteClients ? 7 : 6}>
-                    No manufacturers or importers yet.
+                    {cq ? "No clients match your search." : "No manufacturers or importers yet."}
                   </td>
                 </tr>
               )}
@@ -346,7 +458,7 @@ export default async function CertificationDeskPage({ params }: { params: Promis
                               {canCertify && client.status === "PENDING" && (
                                 <ApprovalActions kind="client" id={client.id} />
                               )}
-                              <DeleteButton action={`/api/cb/client/${client.id}`} />
+                              <DeleteButton action={withBasePath(`/api/cb/client/${client.id}`)} />
                             </div>
                           )}
                         </td>
@@ -363,7 +475,7 @@ export default async function CertificationDeskPage({ params }: { params: Promis
                                 key={`${client.id}-${client.name}-${country ?? ""}-${client.type}`}
                                 idPrefix={`client-${client.id}-`}
                                 method="PATCH"
-                                action={`/api/cb/client/${client.id}`}
+                                action={withBasePath(`/api/cb/client/${client.id}`)}
                                 submitLabel="Save manufacturer or importer"
                                 fields={clientFields(countries, bodyOptions, pickBody, soleCbId, {
                                   name: client.name,
@@ -383,6 +495,12 @@ export default async function CertificationDeskPage({ params }: { params: Promis
             </tbody>
           </table>
         </div>
+        <LinePager
+          page={clientListing.page}
+          pageCount={clientListing.pageCount}
+          prevHref={`${listHref(listPath, clientListing.page - 1, without("cpage"), "cpage")}#clients`}
+          nextHref={`${listHref(listPath, clientListing.page + 1, without("cpage"), "cpage")}#clients`}
+        />
       </section>
             ),
           },
@@ -400,7 +518,7 @@ export default async function CertificationDeskPage({ params }: { params: Promis
           <CrudForm
             searchable
             idPrefix="product-"
-            action="/api/chain/products"
+            action={withBasePath("/api/chain/products")}
             submitLabel="Add product"
             fields={productFormFields({
               traders: activeTraderOptions,
@@ -413,12 +531,24 @@ export default async function CertificationDeskPage({ params }: { params: Promis
             })}
           />
         )}
-        {canWriteProducts && clients.length === 0 && (
+        {canWriteProducts && traderRows.length === 0 && (
           <p className="text-sm text-[var(--muted)]">Add a manufacturer or importer before registering a product.</p>
         )}
         {canWriteProducts && activeTraderOptions.length > 0 && versionOptions.length === 0 && (
           <p className="text-sm text-[var(--muted)]">Import a standard before a product can be certified against it.</p>
         )}
+        <UrlListSearch
+          pathname={listPath}
+          hash="products"
+          param="pq"
+          pageParam="ppage"
+          keep={without("pq", "ppage")}
+          initial={pq}
+          placeholder="Search product, company, commodity, or PIN"
+          from={openListing.from}
+          to={openListing.to}
+          total={openListing.total}
+        />
         <div className="panel overflow-x-auto">
           <table className="w-full min-w-[960px] text-left text-sm">
             <thead>
@@ -438,7 +568,7 @@ export default async function CertificationDeskPage({ params }: { params: Promis
               {openProducts.length === 0 && (
                 <tr>
                   <td colSpan={columns} className="px-4 py-8 text-center text-[var(--muted)]">
-                    No products waiting for certification.
+                    {pq ? "No products match your search." : "No products waiting for certification."}
                   </td>
                 </tr>
               )}
@@ -560,7 +690,7 @@ export default async function CertificationDeskPage({ params }: { params: Promis
                           ) : certified ? (
                             "Certified"
                           ) : (
-                            <DeleteButton action={`/api/chain/product/${product.id}`} />
+                            <DeleteButton action={withBasePath(`/api/chain/product/${product.id}`)} />
                           )}
                         </td>
                       )}
@@ -576,7 +706,7 @@ export default async function CertificationDeskPage({ params }: { params: Promis
                                 key={`${product.id}-${product.originClaimJson ?? ""}`}
                                 idPrefix={`product-${product.id}-`}
                                 method="PATCH"
-                                action={`/api/chain/product/${product.id}`}
+                                action={withBasePath(`/api/chain/product/${product.id}`)}
                                 submitLabel="Save product"
                                 fields={productFormFields({
                                   traders: traderOptions,
@@ -676,6 +806,12 @@ export default async function CertificationDeskPage({ params }: { params: Promis
             </tbody>
           </table>
         </div>
+        <LinePager
+          page={openListing.page}
+          pageCount={openListing.pageCount}
+          prevHref={`${listHref(listPath, openListing.page - 1, without("ppage"), "ppage")}#products`}
+          nextHref={`${listHref(listPath, openListing.page + 1, without("ppage"), "ppage")}#products`}
+        />
       </section>
             ),
           },
@@ -690,6 +826,18 @@ export default async function CertificationDeskPage({ params }: { params: Promis
           The standard stays the one the certificate was issued against. Open every page of that standard from
           the designation.
         </p>
+        <UrlListSearch
+          pathname={listPath}
+          hash="certified"
+          param="kq"
+          pageParam="kpage"
+          keep={without("kq", "kpage")}
+          initial={kq}
+          placeholder="Search product, company, commodity, or PIN"
+          from={certifiedListing.from}
+          to={certifiedListing.to}
+          total={certifiedListing.total}
+        />
         <div className="panel overflow-x-auto">
           <table className="w-full min-w-[960px] text-left text-sm">
             <thead>
@@ -707,7 +855,7 @@ export default async function CertificationDeskPage({ params }: { params: Promis
               {certifiedProducts.length === 0 && (
                 <tr>
                   <td colSpan={canWriteProducts ? 7 : 6} className="px-4 py-8 text-center text-[var(--muted)]">
-                    No certified products yet.
+                    {kq ? "No certified products match your search." : "No certified products yet."}
                   </td>
                 </tr>
               )}
@@ -770,7 +918,7 @@ export default async function CertificationDeskPage({ params }: { params: Promis
                       </td>
                       {canWriteProducts && (
                         <td className="px-4 py-3">
-                          <DeleteButton action={`/api/chain/product/${product.id}`} />
+                          <DeleteButton action={withBasePath(`/api/chain/product/${product.id}`)} />
                         </td>
                       )}
                     </tr>
@@ -785,7 +933,7 @@ export default async function CertificationDeskPage({ params }: { params: Promis
                                 key={`${product.id}-certified-${qualityApp?.coc?.status ?? ""}-${ecoApp?.coc?.status ?? ""}`}
                                 idPrefix={`certified-${product.id}-`}
                                 method="PATCH"
-                                action={`/api/chain/product/${product.id}`}
+                                action={withBasePath(`/api/chain/product/${product.id}`)}
                                 submitLabel="Save certified product"
                                 fields={productFormFields({
                                   traders: traderOptions,
@@ -822,6 +970,12 @@ export default async function CertificationDeskPage({ params }: { params: Promis
             </tbody>
           </table>
         </div>
+        <LinePager
+          page={certifiedListing.page}
+          pageCount={certifiedListing.pageCount}
+          prevHref={`${listHref(listPath, certifiedListing.page - 1, without("kpage"), "kpage")}#certified`}
+          nextHref={`${listHref(listPath, certifiedListing.page + 1, without("kpage"), "kpage")}#certified`}
+        />
       </section>
             ),
           },

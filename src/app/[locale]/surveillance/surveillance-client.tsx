@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { notifyCrud } from "@/components/ui/crud-notice";
+import { apiFetch } from "@/lib/base-path";
 
 export function SurveillanceClient({ locale }: { locale: string }) {
   const router = useRouter();
@@ -15,7 +16,7 @@ export function SurveillanceClient({ locale }: { locale: string }) {
   const [msg, setMsg] = useState<string | null>(null);
 
   async function fileComplaint() {
-    const res = await fetch("/api/surveillance/complaint", {
+    const res = await apiFetch("/api/surveillance/complaint", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pinCode: pin, subject, body, complainantEmail: email }),
@@ -37,7 +38,7 @@ export function SurveillanceClient({ locale }: { locale: string }) {
   }
 
   async function openCase() {
-    const res = await fetch("/api/surveillance/case", {
+    const res = await apiFetch("/api/surveillance/case", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ pinCode: pin, title: subject || "Market surveillance case", summary: body, cascade: false }),
@@ -59,7 +60,7 @@ export function SurveillanceClient({ locale }: { locale: string }) {
   }
 
   return (
-    <div className="panel mt-8 max-w-2xl space-y-3 p-5">
+    <div className="panel max-w-2xl space-y-3 p-5">
       <h2 className="font-semibold">File complaint / open case ({locale})</h2>
       <div className="grid gap-2">
         <Input value={pin} onChange={(e) => setPin(e.target.value)} placeholder="PIN code (optional)" />

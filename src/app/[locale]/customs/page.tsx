@@ -1,15 +1,19 @@
 import { notFound } from "next/navigation";
-import { prisma } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { can } from "@/lib/rbac";
 import { isLocale, t, type Locale } from "@/lib/i18n";
 import { countryOptions } from "@/lib/countries";
-import { customsDeskProduct } from "@/lib/customs-desk";
-import { withDecisionActors } from "@/lib/line-actor";
+import { loadCustomsDeskPage, type CustomsDeskSearchParams } from "@/lib/customs-desk-list";
 import { ClientRedirect } from "@/components/admin/client-redirect";
 import { CustomsDesk } from "./customs-desk";
 
-export default async function CustomsDeskPage({ params }: { params: Promise<{ locale: string }> }) {
+export default async function CustomsDeskPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ locale: string }>;
+  searchParams: Promise<CustomsDeskSearchParams>;
+}) {
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
   const locale = raw as Locale;
@@ -17,30 +21,7 @@ export default async function CustomsDeskPage({ params }: { params: Promise<{ lo
   if (!session) return <ClientRedirect href={`/${locale}/login?next=/${locale}/customs`} />;
   if (!can(session.user, "customs:decide")) return <ClientRedirect href={`/${locale}/dashboard`} />;
 
-  const products = await prisma.product.findMany({
-    include: {
-      company: { include: { clientAccount: { include: { organization: true } } } },
-      standardLinks: { include: { standardVersion: { include: { standard: true } } } },
-      applications: {
-        orderBy: { createdAt: "desc" },
-        include: {
-          organization: true,
-          recordedBy: { select: { name: true, email: true } },
-          coc: true,
-          standardVersion: { include: { standard: true } },
-          testDossier: true,
-          assessmentItems: {
-            include: { evidence: true, recordedBy: { select: { name: true, email: true } } },
-            orderBy: { sortOrder: "asc" },
-          },
-          dossierAttachments: { orderBy: { uploadedAt: "asc" } },
-        },
-      },
-      inspections: { orderBy: { inspectedAt: "desc" } },
-      clearances: { orderBy: { decidedAt: "desc" } },
-    },
-    orderBy: { name: "asc" },
-  });
+  const desk = await loadCustomsDeskPage(await searchParams);
 
   return (
     <main className="shell space-y-6 py-10">
@@ -52,12 +33,22 @@ export default async function CustomsDeskPage({ params }: { params: Promise<{ lo
           documents, and the standard. Documents and the standard open for viewing only.
         </p>
       </div>
-      {products.length === 0 ? (
+      {!desk.anyProducts ? (
         <p className="text-sm text-[var(--muted)]">No products to decide yet.</p>
       ) : (
         <CustomsDesk
           locale={locale}
-          products={(await withDecisionActors(products)).map(customsDeskProduct)}
+          products={desk.products}
+          list={{
+            pathname: `/${locale}/customs`,
+            q: desk.q,
+            page: desk.listing.page,
+            pageCount: desk.listing.pageCount,
+            from: desk.listing.from,
+            to: desk.listing.to,
+            total: desk.listing.total,
+          }}
+          initialProductId={desk.selectedId}
           countries={countryOptions()}
         />
       )}

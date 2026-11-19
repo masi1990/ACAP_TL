@@ -12,6 +12,23 @@ import { SearchSelect } from "@/components/ui/search-select";
 import { notifyCrud } from "@/components/ui/crud-notice";
 import type { AdminFullStandardPreview } from "@/lib/admin-standard-preview";
 import type { BuiltStandardPreview } from "@/lib/standard-preview";
+import { apiFetch, withBasePath } from "@/lib/base-path";
+import type { CustomsDeskProduct, CustomsRequirement, DeskActor } from "@/lib/customs-desk";
+import { annexTitle, DOSSIER_ANNEXES, INTERNAL_CERTIFICATE_KIND } from "@/lib/dossier";
+import { UrlListSearch } from "@/components/admin/url-list-search";
+import { LinePager } from "@/components/line-pager";
+import { listHref } from "@/lib/list-page";
+
+/** Where the product picker is in the server-paged product list (search text and page live in the URL). */
+export type CustomsDeskList = {
+  pathname: string;
+  q: string;
+  page: number;
+  pageCount: number;
+  from: number;
+  to: number;
+  total: number;
+};
 
 type ScopeStandardPreview = BuiltStandardPreview & {
   mode: "scope";
@@ -20,8 +37,6 @@ type ScopeStandardPreview = BuiltStandardPreview & {
 };
 
 type StandardPreview = AdminFullStandardPreview | ScopeStandardPreview;
-import type { CustomsDeskProduct, CustomsRequirement, DeskActor } from "@/lib/customs-desk";
-import { annexTitle, DOSSIER_ANNEXES, INTERNAL_CERTIFICATE_KIND } from "@/lib/dossier";
 
 type OpenFile = {
   kind: "dossier" | "evidence";
@@ -47,7 +62,7 @@ function groupsOf(items: CustomsRequirement[]) {
 }
 
 function ViewOnlyFrame({ file }: { file: OpenFile }) {
-  const src = `/api/customs/files/${file.kind}/${file.id}`;
+  const src = withBasePath(`/api/customs/files/${file.kind}/${file.id}`);
   const image = file.contentType.startsWith("image/") || /\.(png|jpe?g|webp|gif)$/i.test(file.title);
   return (
     <div
@@ -187,15 +202,26 @@ export function CustomsDesk({
   products,
   countries,
   mode = "customs",
+  list,
+  initialProductId = "",
 }: {
   locale: string;
   products: CustomsDeskProduct[];
   countries: { value: string; label: string }[];
   mode?: "customs" | "inspect" | "view";
+  /** Server paging for the product picker; omit when `products` is the whole list. */
+  list?: CustomsDeskList;
+  initialProductId?: string;
 }) {
   const router = useRouter();
-  const [productId, setProductId] = useState("");
-  const [originIso2, setOriginIso2] = useState("");
+  const [productId, setProductId] = useState(initialProductId);
+  /** The chosen product, kept while a page or search change loads rows that may not include it. */
+  const [pinned, setPinned] = useState<CustomsDeskProduct | null>(
+    () => products.find((row) => row.id === initialProductId) ?? null,
+  );
+  const [originIso2, setOriginIso2] = useState(
+    () => products.find((row) => row.id === initialProductId)?.originIso2 ?? "",
+  );
   const [destinationIso2, setDestinationIso2] = useState("");
   const [decision, setDecision] = useState("HOLD");
   const [reason, setReason] = useState("");
@@ -211,13 +237,19 @@ export function CustomsDesk({
   const [standardBusy, setStandardBusy] = useState(false);
 
   const product = useMemo(
-    () => products.find((row) => row.id === productId) ?? null,
-    [products, productId],
+    () =>
+      products.find((row) => row.id === productId) ?? (pinned && pinned.id === productId ? pinned : null),
+    [products, productId, pinned],
   );
 
   function chooseProduct(id: string) {
     const next = products.find((row) => row.id === id) ?? null;
     setProductId(id);
+    setPinned(next);
+    if (list && mode !== "view") {
+      const href = listHref(list.pathname, list.page, { q: list.q, product: id || undefined });
+      router.replace(`${href}${window.location.hash}`, { scroll: false });
+    }
     setOriginIso2(next?.originIso2 ?? "");
     setOpenFile(null);
     setStandard(null);
@@ -255,7 +287,7 @@ export function CustomsDesk({
     setStandard(null);
     setStandardError(null);
     setStandardBusy(true);
-    fetch(`/api/customs/standards/${standardId}`)
+    apiFetch(`/api/customs/standards/${standardId}`)
       .then(async (res) => {
         const body = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(body.error || "The standard could not be opened");
@@ -310,7 +342,7 @@ export function CustomsDesk({
     setBusy(true);
     setError(null);
     setMsg(null);
-    const res = await fetch(mode === "inspect" ? "/api/chain/inspections" : "/api/chain/customs", {
+    const res = await apiFetch(mode === "inspect" ? "/api/chain/inspections" : "/api/chain/customs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(
@@ -350,6 +382,25 @@ export function CustomsDesk({
   return (
     <div className="space-y-6">
       <div className="panel space-y-3 p-4">
+        {mode !== "view" && list && (
+          <div className="space-y-3">
+            <UrlListSearch
+              pathname={list.pathname}
+              keep={{ product: productId || undefined }}
+              initial={list.q}
+              placeholder="Search product, company, or commodity"
+              from={list.from}
+              to={list.to}
+              total={list.total}
+            />
+            <LinePager
+              page={list.page}
+              pageCount={list.pageCount}
+              prevHref={listHref(list.pathname, list.page - 1, { q: list.q, product: productId || undefined })}
+              nextHref={listHref(list.pathname, list.page + 1, { q: list.q, product: productId || undefined })}
+            />
+          </div>
+        )}
         {mode !== "view" && (
         <div className="grid gap-1">
           <Label htmlFor={mode === "inspect" ? "inspect-productId" : "customs-productId"}>Product</Label>
@@ -359,7 +410,7 @@ export function CustomsDesk({
             onChange={chooseProduct}
             placeholder="Select…"
             searchPlaceholder="Search products"
-            options={products.map((row) => ({ value: row.id, label: row.label }))}
+            options={(product && !products.some((row) => row.id === product.id) ? [product, ...products] : products).map((row) => ({ value: row.id, label: row.label }))}
           />
         </div>
         )}

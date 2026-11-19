@@ -161,7 +161,10 @@ export default async function VerifyPage({
         {t(locale, "verifyTitle")}
       </h1>
       <p className="rise-delay mt-2 text-[var(--muted)]">{t(locale, "verifyHint")}</p>
-      <VerifyForm locale={locale} initialPin={pinCode} />
+      {/* Short single-result page: the form stays in view while the result is read or the PIN is changed. */}
+      <div className="sticky top-0 z-20 -mx-1 bg-[var(--surface)] px-1 pb-2">
+        <VerifyForm locale={locale} initialPin={pinCode} />
+      </div>
 
       <div className="mt-6 max-w-[32rem]">
         {!data && (
