@@ -264,13 +264,17 @@ model LibraryStandardRequest {
 }
 
 model LibraryStandardRequestItem {
-  id        String                 @id @default(cuid())
-  requestId String
-  request   LibraryStandardRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  standardId String
-  standard  Standard               @relation(fields: [standardId], references: [id])
+  id              String                 @id @default(cuid())
+  requestId       String
+  request         LibraryStandardRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  standardId      String?
+  standard        Standard?              @relation(fields: [standardId], references: [id])
+  designationText String                 @default("")
+  titleText       String                 @default("")
+  missingText     Boolean                @default(false)
 
-  @@unique([requestId, standardId])
+  @@index([requestId])
+  @@index([standardId])
 }
 
 /// An email of selected standards. The token opens account creation or sign-in. It does not serve the PDF.
