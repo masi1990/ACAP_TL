@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from "react";
 import type { Locale } from "@/lib/i18n";
-import { LibraryStandardBrowser, type LibraryFacet, type LibraryStandardRow } from "./library-standard-browser";
+import { LibraryCatalogue } from "./library-catalogue";
+import type { LibraryFacet, LibraryStandardRow } from "./library-types";
 
 type Option = { id: string; name: string; countries: { id: string; name: string }[] };
 type StandardOption = { id: string; designation: string; titleEn: string };
+type OtherItem = { id: string; designation: string; title: string };
 
 export function StandardRequestForm({
   locale,
@@ -28,6 +30,7 @@ export function StandardRequestForm({
   const [matchCount, setMatchCount] = useState(0);
   const [searching, setSearching] = useState(false);
   const [selected, setSelected] = useState<StandardOption[]>([]);
+  const [otherItems, setOtherItems] = useState<OtherItem[]>([]);
   const [numbers, setNumbers] = useState("");
   const [showNumbers, setShowNumbers] = useState(false);
   const [message, setMessage] = useState("");
@@ -103,8 +106,11 @@ export function StandardRequestForm({
     event.preventDefault();
     setError("");
     setMessage("");
-    if (!selected.length) {
-      setError("Add at least one standard");
+    const otherToSend = otherItems
+      .map((row) => ({ designation: row.designation.trim(), title: row.title.trim() }))
+      .filter((row) => row.designation);
+    if (!selected.length && !otherToSend.length) {
+      setError("Add at least one standard, or list one under Other / not listed.");
       return;
     }
     const form = new FormData(event.currentTarget);
@@ -118,12 +124,14 @@ export function StandardRequestForm({
         memberStateId: form.get("memberStateId"),
         note: form.get("note"),
         standardIds: selected.map((item) => item.id),
+        otherItems: otherToSend,
       }),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) setError(data.error || "Could not send the request");
     else {
       setSelected([]);
+      setOtherItems([]);
       setQuery("");
       setMessage("Request sent. ARSO will email a link if the standards are released.");
     }
@@ -132,9 +140,8 @@ export function StandardRequestForm({
   const shownAll = matchCount > 0 && matchCount === results.length;
 
   return (
-    <form onSubmit={onSubmit} className="mt-10 grid gap-3 rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4">
+    <form onSubmit={onSubmit} className="grid gap-4">
       <div className="grid max-w-2xl gap-3">
-      <h2 className="text-lg font-semibold">Request particular standards</h2>
       <p className="text-sm text-[var(--muted)]">
         Browse the {standardCount.toLocaleString()} published standards by sector, technical committee, and category, or search by number or name.
         ARSO emails one link. The link does not download the file.
@@ -210,7 +217,8 @@ export function StandardRequestForm({
             Add all shown
           </button>
         ) : null}
-        <LibraryStandardBrowser
+        <LibraryCatalogue
+          mode="add"
           locale={locale}
           rows={results}
           facets={facets || undefined}
@@ -235,6 +243,52 @@ export function StandardRequestForm({
             );
           }}
         />
+
+        <section className="grid gap-2 rounded-lg border border-dashed border-[var(--line)] p-3">
+          <h3 className="text-sm font-semibold">Other / not listed</h3>
+          <p className="text-xs text-[var(--muted)]">
+            Use this when the standard is missing from the catalogue or you only know the number.
+          </p>
+          {otherItems.map((row) => (
+            <div key={row.id} className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto] sm:items-end">
+              <label className="grid gap-1 text-xs">
+                Designation (required)
+                <input
+                  value={row.designation}
+                  onChange={(event) =>
+                    setOtherItems((rows) => rows.map((r) => (r.id === row.id ? { ...r, designation: event.target.value } : r)))
+                  }
+                  placeholder="ARS 1234"
+                  className="rounded-md border border-[var(--line)] px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="grid gap-1 text-xs">
+                Title (optional)
+                <input
+                  value={row.title}
+                  onChange={(event) =>
+                    setOtherItems((rows) => rows.map((r) => (r.id === row.id ? { ...r, title: event.target.value } : r)))
+                  }
+                  className="rounded-md border border-[var(--line)] px-3 py-2 text-sm"
+                />
+              </label>
+              <button
+                type="button"
+                className="w-fit rounded-md border border-[var(--line)] px-3 py-2 text-xs"
+                onClick={() => setOtherItems((rows) => rows.filter((r) => r.id !== row.id))}
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            className="w-fit rounded-md border border-[var(--line)] px-3 py-1.5 text-sm"
+            onClick={() => setOtherItems((rows) => [...rows, { id: crypto.randomUUID(), designation: "", title: "" }])}
+          >
+            {otherItems.length ? "Add another" : "Add a standard not listed"}
+          </button>
+        </section>
 
         <button type="button" className="w-fit text-sm underline" onClick={() => setShowNumbers((open) => !open)}>
           {showNumbers ? "Hide number list" : "Paste standard numbers"}
