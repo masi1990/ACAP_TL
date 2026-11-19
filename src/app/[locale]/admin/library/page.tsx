@@ -108,7 +108,15 @@ export default async function AdminLibraryPage({
           organization: row.organization.name,
           country: row.memberState.name,
           note: row.note,
-          standardIds: row.items.map((item) => item.standardId),
+          standardIds: row.items.map((item) => item.standardId).filter((id): id is string => Boolean(id)),
+          items: row.items.map((item) => ({
+            id: item.id,
+            standardId: item.standardId,
+            label: item.standard?.designation || item.designationText || "(unnamed)",
+            title: item.standard?.titleEn || item.titleText || "",
+            notListed: !item.standardId,
+            noText: item.missingText,
+          })),
         }))}
         activity={activity.map((row) => ({
           id: row.id,

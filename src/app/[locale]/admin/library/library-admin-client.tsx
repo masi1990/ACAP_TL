@@ -23,6 +23,7 @@ export function LibraryAdminClient(props: {
     country: string;
     note: string;
     standardIds: string[];
+    items: { id: string; standardId: string | null; label: string; title: string; notListed: boolean; noText: boolean }[];
   }[];
   activity: { id: string; at: string; action: string; role: string; person: string; organization: string; standard: string; language: string; posting: string }[];
   audits: { id: string; at: string; action: string; person: string }[];
@@ -150,7 +151,18 @@ export function LibraryAdminClient(props: {
           >
             <p>{row.name} · {row.email} · {row.organization} · {row.country}</p>
             {row.note ? <p className="text-[var(--muted)]">{row.note}</p> : null}
-            <div className="mt-2 grid max-h-48 gap-1 overflow-auto">
+            <ul className="mt-2 space-y-1">
+              {row.items.map((item) => (
+                <li key={item.id} className="flex flex-wrap items-center gap-2">
+                  <span>{item.label}</span>
+                  {item.title ? <span className="text-[var(--muted)]">{item.title}</span> : null}
+                  {item.notListed ? <span className="rounded-full border px-2 py-0.5 text-xs">[not listed]</span> : null}
+                  {item.noText ? <span className="rounded-full border px-2 py-0.5 text-xs">[no text]</span> : null}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-xs text-[var(--muted)]">Select the catalogue standards to email. Items that are not listed cannot be released from here.</p>
+            <div className="mt-1 grid max-h-48 gap-1 overflow-auto">
               {props.standards.map((standard) => (
                 <label key={standard.id} className="flex gap-2">
                   <input type="checkbox" name="standardIds" value={standard.id} defaultChecked={row.standardIds.includes(standard.id)} />

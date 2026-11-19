@@ -68,6 +68,11 @@ export async function AdminChrome({
       show: can(session.user, "institutions:write") || can(session.user, "audit:read"),
     },
     {
+      href: `/${locale}/admin/library/reports`,
+      label: "Library reports",
+      show: can(session.user, "institutions:write") || can(session.user, "audit:read"),
+    },
+    {
       href: `/${locale}/admin/standards/import`,
       label: t(locale, "Import PDF/Word"),
       show: systemAdmin && can(session.user, "standards:import"),
