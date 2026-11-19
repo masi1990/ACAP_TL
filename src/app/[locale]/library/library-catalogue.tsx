@@ -21,6 +21,8 @@ export function LibraryCatalogue({
   query,
   onQuery,
   totalCount,
+  page,
+  onPage,
 }: {
   locale: Locale;
   rows: LibraryStandardRow[];
@@ -36,6 +38,9 @@ export function LibraryCatalogue({
   onQuery?: (value: string) => void;
   /** Server match total when `rows` is capped. */
   totalCount?: number;
+  /** Server-paged mode: `rows` is one page; pass the 1-based page and its setter. */
+  page?: number;
+  onPage?: (page: number) => void;
 }) {
   const [view, setView] = useState<"browse" | "analysis">("browse");
   const [localFilter, setLocalFilter] = useState<LibraryFilter>({ sectorId: "", committeeId: "", kind: "" });
@@ -77,6 +82,8 @@ export function LibraryCatalogue({
                 onQuery={onQuery}
                 showSearch={mode === "browse"}
                 totalCount={totalCount}
+                page={page}
+                onPage={onPage}
               />
             </div>
           ),

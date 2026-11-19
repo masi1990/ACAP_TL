@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { isLocale, type Locale } from "@/lib/i18n";
-import { loadLibraryInstitutions } from "@/lib/library";
+import { getSessionUser } from "@/lib/auth";
+import { loadLibraryInstitutions, userLibraryView } from "@/lib/library";
 import { standardVersionHasText } from "@/lib/library-text";
-import { standardKindOrNull, standardKindQuery } from "@/lib/standard-kinds";
+import { publishedLocales, standardKindOrNull, standardKindQuery } from "@/lib/standard-kinds";
 
+/** Default and maximum rows per response; callers that page pass `page` + `pageSize`. */
 const PAGE = 200;
 const NUMBER_LIMIT = 100;
 
@@ -32,7 +34,8 @@ const standardSelect = {
     take: 1,
     select: {
       sourcePdfUri: true,
-      languageFiles: { select: { sourcePdfUri: true } },
+      authoritativeLocale: true,
+      languageFiles: { select: { locale: true, sourcePdfUri: true } },
     },
   },
 } as const;
@@ -52,10 +55,10 @@ function textMatch(q: string) {
   };
 }
 
-function listingWhere(opts: { q: string; sectorId: string; committeeId: string; kind: string }) {
+function listingWhere(opts: { q: string; sectorId: string; committeeId: string; kind: string; scope: object }) {
   const unassigned = opts.sectorId === "unassigned" || opts.committeeId === "unassigned";
   return {
-    ...published,
+    ...opts.scope,
     ...(opts.kind ? { kind: { in: standardKindQuery(opts.kind) } } : {}),
     ...(unassigned
       ? { technicalCommitteeId: null }
@@ -76,6 +79,8 @@ export async function GET(req: NextRequest) {
   const kindValues = standardKindQuery(req.nextUrl.searchParams.get("kind"));
   const kind = kindValues[0] || "";
   const browse = req.nextUrl.searchParams.get("browse") === "1" || q.length >= 2 || Boolean(sectorId || committeeId || kind);
+  const page = Math.max(1, Math.floor(Number(req.nextUrl.searchParams.get("page"))) || 1);
+  const pageSize = Math.min(PAGE, Math.max(1, Math.floor(Number(req.nextUrl.searchParams.get("pageSize"))) || PAGE));
   const lang = req.nextUrl.searchParams.get("lang") || "en";
   const locale: Locale = isLocale(lang) ? lang : "en";
   const numbers = [
@@ -87,9 +92,20 @@ export async function GET(req: NextRequest) {
     ),
   ].slice(0, NUMBER_LIMIT);
 
+  // `holdings=1`: only what the signed-in library user may download (full access, or released standards).
+  let scope: object = published;
+  const holdings = req.nextUrl.searchParams.get("holdings") === "1";
+  if (holdings) {
+    const session = await getSessionUser();
+    if (!session) return NextResponse.json({ error: "Sign in to view your holdings" }, { status: 401 });
+    const view = await userLibraryView(session.userId);
+    if (!view.access.length) return NextResponse.json({ error: "No library access" }, { status: 403 });
+    if (!view.full) scope = { ...published, id: { in: view.releasedIds } };
+  }
+
   const [institutions, standardCount, sectorRows, committees, kindGroups, searched, numbered] = await Promise.all([
-    loadLibraryInstitutions(),
-    prisma.standard.count({ where: published }),
+    holdings ? Promise.resolve([]) : loadLibraryInstitutions(),
+    prisma.standard.count({ where: scope }),
     prisma.sector.findMany({ orderBy: { code: "asc" }, select: { id: true, code: true, name: true } }),
     prisma.technicalCommittee.findMany({
       orderBy: { code: "asc" },
@@ -104,18 +120,19 @@ export async function GET(req: NextRequest) {
     }),
     prisma.standard.groupBy({
       by: ["technicalCommitteeId", "kind"],
-      where: published,
+      where: scope,
       _count: { _all: true },
     }),
     browse
       ? Promise.all([
           prisma.standard.findMany({
-            where: listingWhere({ q, sectorId, committeeId, kind }),
+            where: listingWhere({ q, sectorId, committeeId, kind, scope }),
             orderBy: { designation: "asc" },
-            take: PAGE,
+            skip: (page - 1) * pageSize,
+            take: pageSize,
             select: standardSelect,
           }),
-          prisma.standard.count({ where: listingWhere({ q, sectorId, committeeId, kind }) }),
+          prisma.standard.count({ where: listingWhere({ q, sectorId, committeeId, kind, scope }) }),
         ])
       : Promise.resolve([[], 0] as const),
     numbers.length
@@ -139,8 +156,10 @@ export async function GET(req: NextRequest) {
     matchCount,
     missing,
     facets: buildFacets(sectorRows, committees, kindGroups),
-    standards: standards.map((standard) => shape(standard, locale)),
-    numbered: numbered.map((standard) => shape(standard, locale)),
+    standards: standards.map((standard) => shape(standard, locale, holdings)),
+    page,
+    pageSize,
+    numbered: numbered.map((standard) => shape(standard, locale, false)),
     institutions: institutions.map((org) => ({
       id: org.id,
       name: org.name,
@@ -258,9 +277,14 @@ function shape(
       name: string;
       sector: { id: string; code: string; name: string };
     } | null;
-    versions: Array<{ sourcePdfUri: string | null; languageFiles: Array<{ sourcePdfUri: string | null }> }>;
+    versions: Array<{
+      sourcePdfUri: string | null;
+      authoritativeLocale: string;
+      languageFiles: Array<{ locale: string; sourcePdfUri: string | null }>;
+    }>;
   },
   locale: Locale,
+  withLanguages: boolean,
 ) {
   const committee = standard.technicalCommittee;
   return {
@@ -277,5 +301,14 @@ function shape(
     committeeCode: committee?.code || "",
     committeeName: committee?.name || "Not yet classified",
     hasText: standardVersionHasText(standard.versions[0] || {}),
+    ...(withLanguages && standard.versions[0]
+      ? {
+          languages: publishedLocales(
+            standard.versions[0].languageFiles,
+            standard.versions[0].authoritativeLocale,
+            standard.versions[0].sourcePdfUri,
+          ).map((code) => ({ code, href: `/api/library/standards/${standard.id}/file?lang=${code}` })),
+        }
+      : {}),
   };
 }

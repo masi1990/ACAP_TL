@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { LIST_PAGE_SIZE } from "@/lib/list-page";
 import { listCertifiedProducts, type MarkFilter, type StatusFilter } from "@/lib/registry";
 
 /** Public certified-products registry (no auth). */
@@ -18,7 +19,7 @@ export async function GET(req: NextRequest) {
     standardVersionId: sp.get("standardVersionId") || undefined,
     designation: sp.get("designation") || undefined,
     page: Number(sp.get("page") || 1) || 1,
-    pageSize: Number(sp.get("pageSize") || 12) || 12,
+    pageSize: Number(sp.get("pageSize") || LIST_PAGE_SIZE) || LIST_PAGE_SIZE,
   });
   return NextResponse.json({ ok: true, ...data });
 }

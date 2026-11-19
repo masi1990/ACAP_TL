@@ -6,7 +6,6 @@ import type { Locale } from "@/lib/i18n";
 import { LibraryActivityPanel } from "./library-activity-panel";
 import { LibraryHoldings } from "./library-standard-browser";
 import { LibraryOptionsBrowser } from "./library-options-browser";
-import type { LibraryStandardRow } from "./library-types";
 
 export type LibraryActivityItem = {
   id: string;
@@ -20,15 +19,15 @@ export type LibraryActivityItem = {
 
 export function LibraryPageShell({
   locale,
-  holdingsRows,
+  holdingsCount,
   accessMessage,
   activity,
   signedIn,
   requestForm,
 }: {
   locale: Locale;
-  /** Holdings released to the user; null or empty falls back to the read-only public catalogue. */
-  holdingsRows: LibraryStandardRow[] | null;
+  /** How many standards are released to the user (rows load by page); null or 0 falls back to the public catalogue. */
+  holdingsCount: number | null;
   accessMessage?: ReactNode;
   activity: LibraryActivityItem[];
   signedIn: boolean;
@@ -41,8 +40,8 @@ export function LibraryPageShell({
       content: (
         <div className="grid gap-4">
           {accessMessage}
-          {holdingsRows && holdingsRows.length > 0 ? (
-            <LibraryHoldings locale={locale} rows={holdingsRows} />
+          {holdingsCount ? (
+            <LibraryHoldings locale={locale} />
           ) : (
             <LibraryOptionsBrowser locale={locale} />
           )}

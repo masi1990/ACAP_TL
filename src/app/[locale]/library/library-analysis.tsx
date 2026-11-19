@@ -42,7 +42,7 @@ export function LibraryAnalysis({
     { label: "Sectors", value: catalogue.sectors.length, bg: "#0f2a24" },
     { label: "Technical committees", value: catalogue.committees.length, bg: "#245c74" },
     { label: "Standards", value: standardTotal, bg: "#1f6b54" },
-    { label: "No text (loaded)", value: noText, bg: "#7a3b2e" },
+    { label: "No text (listed)", value: noText, bg: "#7a3b2e" },
   ];
 
   return (

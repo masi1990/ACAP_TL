@@ -1,14 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { LinePager } from "@/components/line-pager";
+import { ListToolbar } from "@/components/list-toolbar";
 import { cn } from "@/lib/utils";
 import type { RegistryProduct } from "@/lib/registry";
 import { t as tr, isLocale, type Locale } from "@/lib/i18n";
+import { apiFetch } from "@/lib/base-path";
+import { LIST_PAGE_SIZE, listPage } from "@/lib/list-page";
 
 type CountryGroup = {
   id: string;
@@ -47,6 +49,7 @@ export function RegistryClient({ locale }: { locale: string }) {
   const designation = searchParams.get("designation") || "";
 
   const [queryDraft, setQueryDraft] = useState(q);
+  const pushedQuery = useRef(q);
   const [data, setData] = useState<RegistryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -65,9 +68,29 @@ export function RegistryClient({ locale }: { locale: string }) {
     [pathname, router, searchParams],
   );
 
+  // Follow the URL only when it changed from outside (back/forward), not from our own debounced push.
   useEffect(() => {
-    setQueryDraft(q);
+    if (q !== pushedQuery.current) {
+      pushedQuery.current = q;
+      setQueryDraft(q);
+    }
   }, [q]);
+
+  useEffect(() => {
+    const next = queryDraft.trim();
+    if (next === q) return;
+    const timer = setTimeout(() => {
+      pushedQuery.current = next;
+      setParams({ q: next || null });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [queryDraft, q, setParams]);
+
+  function clearQuery() {
+    setQueryDraft("");
+    pushedQuery.current = "";
+    setParams({ q: null });
+  }
 
   useEffect(() => {
     const ac = new AbortController();
@@ -78,10 +101,10 @@ export function RegistryClient({ locale }: { locale: string }) {
     if (q) params.set("q", q);
     if (page > 1) params.set("page", String(page));
     if (designation) params.set("designation", designation);
-    params.set("pageSize", "12");
+    params.set("pageSize", String(LIST_PAGE_SIZE));
 
     setError(null);
-    fetch(`/api/registry/products?${params}`, { signal: ac.signal })
+    apiFetch(`/api/registry/products?${params}`, { signal: ac.signal })
       .then(async (res) => {
         const json = (await res.json()) as RegistryResponse & { error?: string };
         if (!res.ok) throw new Error(json.error || "Failed to load registry");
@@ -132,24 +155,16 @@ export function RegistryClient({ locale }: { locale: string }) {
         </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
-        <form
-          className="flex gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setParams({ q: queryDraft.trim() || null });
-          }}
-        >
-          <Input
-            value={queryDraft}
-            onChange={(e) => setQueryDraft(e.target.value)}
-            placeholder="Search product, company, certificate, standard…"
-            aria-label="Search certified products"
-          />
-          <Button type="submit" disabled={pending}>
-            Search
-          </Button>
-        </form>
+      <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto] sm:items-end">
+        <ListToolbar
+          value={queryDraft}
+          onChange={setQueryDraft}
+          onClear={clearQuery}
+          placeholder="Search product, company, certificate, standard…"
+          from={data ? listPage(String(data.page), data.total).from : undefined}
+          to={data ? listPage(String(data.page), data.total).to : undefined}
+          total={data?.total}
+        />
 
         <select
           className="h-10 rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 text-sm"
@@ -208,9 +223,6 @@ export function RegistryClient({ locale }: { locale: string }) {
 
       {data && (
         <div className="flex flex-wrap gap-4 text-sm text-[var(--muted)]">
-          <span>
-            Total listed: <strong className="text-[var(--ink)]">{data.total}</strong>
-          </span>
           <span>
             Currently certified: <strong className="text-[var(--ink)]">{data.counts.certified}</strong>
           </span>
@@ -309,29 +321,9 @@ export function RegistryClient({ locale }: { locale: string }) {
         </section>
       ))}
 
-      {data && data.pageCount > 1 && (
-        <div className="flex items-center justify-between gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            disabled={data.page <= 1}
-            onClick={() => setParams({ page: String(data.page - 1) })}
-          >
-            Prev
-          </Button>
-          <p className="text-sm text-[var(--muted)]">
-            Page {data.page} of {data.pageCount}
-          </p>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={data.page >= data.pageCount}
-            onClick={() => setParams({ page: String(data.page + 1) })}
-          >
-            Next
-          </Button>
-        </div>
-      )}
+      {data ? (
+        <LinePager page={data.page} pageCount={data.pageCount} onPage={(next) => setParams({ page: next > 1 ? String(next) : null })} />
+      ) : null}
     </div>
   );
 }

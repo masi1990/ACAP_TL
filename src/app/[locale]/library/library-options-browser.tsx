@@ -1,23 +1,48 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { Locale } from "@/lib/i18n";
 import { apiFetch } from "@/lib/base-path";
+import { LIST_PAGE_SIZE } from "@/lib/list-page";
 import { LibraryCatalogue } from "./library-catalogue";
 import type { LibraryFacet, LibraryFilter, LibraryStandardRow } from "./library-types";
 
-/** Read-only catalogue for visitors without library access, fed by the public options API. */
-export function LibraryOptionsBrowser({ locale }: { locale: Locale }) {
+/**
+ * Server-paged catalogue (20 per page) fed by the options API: the public catalogue for visitors,
+ * or, with `holdings`, only the standards released to the signed-in library user.
+ */
+export function LibraryOptionsBrowser({
+  locale,
+  holdings = false,
+  action,
+  emptyLabel,
+}: {
+  locale: Locale;
+  holdings?: boolean;
+  action?: (row: LibraryStandardRow) => ReactNode;
+  emptyLabel?: string;
+}) {
   const [facets, setFacets] = useState<LibraryFacet | null>(null);
   const [filter, setFilter] = useState<LibraryFilter>({ sectorId: "", committeeId: "", kind: "" });
-  const [query, setQuery] = useState("");
+  const [query, setQueryState] = useState("");
+  const [page, setPage] = useState(1);
   const [rows, setRows] = useState<LibraryStandardRow[]>([]);
   const [matchCount, setMatchCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  function setQuery(value: string) {
+    setQueryState(value);
+    setPage(1);
+  }
+  function applyFilter(next: LibraryFilter) {
+    setFilter(next);
+    setPage(1);
+  }
+
   useEffect(() => {
-    const params = new URLSearchParams({ browse: "1", lang: locale });
+    const params = new URLSearchParams({ browse: "1", lang: locale, page: String(page), pageSize: String(LIST_PAGE_SIZE) });
+    if (holdings) params.set("holdings", "1");
     const q = query.trim();
     if (q.length >= 2) params.set("q", q);
     if (filter.sectorId) params.set("sector", filter.sectorId);
@@ -50,7 +75,7 @@ export function LibraryOptionsBrowser({ locale }: { locale: Locale }) {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [query, filter, locale]);
+  }, [query, filter, locale, page, holdings]);
 
   return (
     <div className="grid gap-3">
@@ -61,11 +86,18 @@ export function LibraryOptionsBrowser({ locale }: { locale: Locale }) {
         rows={rows}
         facets={facets || undefined}
         filter={filter}
-        onFilter={setFilter}
+        onFilter={applyFilter}
+        action={action}
         query={query}
         onQuery={setQuery}
         totalCount={matchCount}
-        emptyLabel={loading ? "Loading standards…" : "No published standards match this selection."}
+        page={page}
+        onPage={setPage}
+        emptyLabel={
+          loading
+            ? "Loading standards…"
+            : emptyLabel || "No published standards match this selection."
+        }
       />
     </div>
   );

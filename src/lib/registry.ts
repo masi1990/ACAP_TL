@@ -6,6 +6,7 @@
 import { prisma } from "@/lib/db";
 import { countryByIso2, countriesGroupedByRegion } from "@/lib/africa-regions";
 import { importedRegistryRows } from "@/lib/imported-marks";
+import { LIST_PAGE_SIZE } from "@/lib/list-page";
 
 export type MarkFilter = "ALL" | "QUALITY" | "ECO" | "BOTH";
 export type StatusFilter = "ALL" | "certified" | "expired" | "suspended" | "withdrawn";
@@ -83,7 +84,7 @@ export async function listCertifiedProducts(opts: {
   pageSize?: number;
 }) {
   const page = Math.max(1, opts.page || 1);
-  const pageSize = Math.min(50, Math.max(1, opts.pageSize || 12));
+  const pageSize = Math.min(50, Math.max(1, opts.pageSize || LIST_PAGE_SIZE));
   const status = opts.status && opts.status !== "ALL" ? opts.status : undefined;
   const country = opts.country?.toUpperCase();
   const rec = opts.rec?.toUpperCase();

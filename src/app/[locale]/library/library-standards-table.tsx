@@ -2,11 +2,13 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { CountryMark } from "@/components/country-mark";
+import { LinePager } from "@/components/line-pager";
+import { ListToolbar } from "@/components/list-toolbar";
 import type { Locale } from "@/lib/i18n";
+import { listPage } from "@/lib/list-page";
+import { rowMatchesQuery } from "@/lib/list-query";
 import { standardKindLabel } from "@/lib/standard-kinds";
 import { kindRank, kindTone, type LibraryFacet, type LibraryFilter, type LibraryStandardRow } from "./library-types";
-
-const PAGE = 100;
 
 export function LibraryStandardsTable({
   locale,
@@ -20,8 +22,11 @@ export function LibraryStandardsTable({
   onQuery,
   showSearch,
   totalCount,
+  page,
+  onPage,
 }: {
   locale: Locale;
+  /** Server-paged mode (`onPage` set): the current page only. Otherwise every row, paged here. */
   rows: LibraryStandardRow[];
   catalogue: LibraryFacet;
   filter: LibraryFilter;
@@ -32,47 +37,62 @@ export function LibraryStandardsTable({
   query?: string;
   onQuery?: (value: string) => void;
   showSearch: boolean;
-  /** Server-side match total when `rows` is a capped page of a larger result set. */
+  /** Server-side match total when `rows` is one page of a larger result set. */
   totalCount?: number;
+  /** 1-based page of the server result set (server-paged mode). */
+  page?: number;
+  onPage?: (page: number) => void;
 }) {
   const [localQuery, setLocalQuery] = useState("");
-  const [limit, setLimit] = useState(PAGE);
+  const [localPage, setLocalPage] = useState(1);
+  const serverPaged = onPage != null;
   const parentOwnsQuery = onQuery != null;
   const filterKey = `${filter.sectorId}|${filter.committeeId}|${filter.kind}`;
   const [seenFilterKey, setSeenFilterKey] = useState(filterKey);
   if (seenFilterKey !== filterKey) {
     setSeenFilterKey(filterKey);
-    setLimit(PAGE);
+    setLocalPage(1);
   }
-  const text = (parentOwnsQuery ? query || "" : localQuery).trim().toLowerCase();
+  const toolbarValue = parentOwnsQuery ? query || "" : localQuery;
 
-  const scoped = useMemo(
-    () =>
-      rows.filter(
-        (row) =>
-          (!filter.sectorId || row.sectorId === filter.sectorId) && (!filter.committeeId || row.committeeId === filter.committeeId),
-      ),
-    [rows, filter.sectorId, filter.committeeId],
-  );
-
+  // Category pills count the whole selection (from facets), not just the rows on this page.
   const kinds = useMemo(() => {
     const totals = new Map<string, number>();
-    for (const row of scoped) totals.set(row.kind, (totals.get(row.kind) || 0) + 1);
+    for (const row of catalogue.counts) {
+      if (filter.sectorId && row.sectorId !== filter.sectorId) continue;
+      if (filter.committeeId && row.committeeId !== filter.committeeId) continue;
+      totals.set(row.kind, (totals.get(row.kind) || 0) + row.count);
+    }
     return [...totals.entries()].sort((a, b) => kindRank(a[0]) - kindRank(b[0]) || a[0].localeCompare(b[0]));
-  }, [scoped]);
+  }, [catalogue.counts, filter.sectorId, filter.committeeId]);
+  const allCount = kinds.reduce((sum, [, count]) => sum + count, 0);
 
-  const visible = useMemo(
-    () =>
-      scoped.filter((row) => {
-        if (filter.kind && row.kind !== filter.kind) return false;
-        if (!parentOwnsQuery && text) return row.designation.toLowerCase().includes(text) || row.title.toLowerCase().includes(text);
-        return true;
-      }),
-    [scoped, filter.kind, parentOwnsQuery, text],
-  );
-  const shown = visible.slice(0, limit);
-  const total = Math.max(totalCount ?? 0, visible.length);
-  const capped = total > visible.length;
+  const visible = useMemo(() => {
+    if (serverPaged) return rows;
+    return rows.filter(
+      (row) =>
+        (!filter.sectorId || row.sectorId === filter.sectorId) &&
+        (!filter.committeeId || row.committeeId === filter.committeeId) &&
+        (!filter.kind || row.kind === filter.kind) &&
+        (parentOwnsQuery || rowMatchesQuery(row, localQuery, ["designation", "title"])),
+    );
+  }, [rows, serverPaged, parentOwnsQuery, localQuery, filter.sectorId, filter.committeeId, filter.kind]);
+
+  const total = serverPaged ? Math.max(totalCount ?? 0, rows.length) : visible.length;
+  const pg = listPage(String(serverPaged ? page : localPage), total);
+  const shown = serverPaged ? visible : visible.slice(pg.skip, pg.skip + pg.take);
+
+  function changeQuery(value: string) {
+    if (parentOwnsQuery) onQuery?.(value);
+    else {
+      setLocalQuery(value);
+      setLocalPage(1);
+    }
+  }
+  function goPage(next: number) {
+    if (serverPaged) onPage?.(next);
+    else setLocalPage(next);
+  }
 
   const committee = filter.committeeId ? catalogue.committees.find((item) => item.id === filter.committeeId) : null;
   const sector = filter.sectorId ? catalogue.sectors.find((item) => item.id === filter.sectorId) : null;
@@ -99,21 +119,16 @@ export function LibraryStandardsTable({
         ) : null}
       </header>
 
-      <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 bg-[var(--background,white)] py-2">
+      <div className="sticky top-0 z-10 grid gap-2 bg-[var(--background,white)] py-2">
         {showSearch || parentOwnsQuery ? (
-          <input
-            type="search"
-            value={parentOwnsQuery ? query || "" : localQuery}
-            onChange={(event) => {
-              if (parentOwnsQuery) onQuery?.(event.target.value);
-              else {
-                setLocalQuery(event.target.value);
-                setLimit(PAGE);
-              }
-            }}
+          <ListToolbar
+            value={toolbarValue}
+            onChange={changeQuery}
+            onClear={() => changeQuery("")}
             placeholder="Search designation or title"
-            aria-label="Search standards"
-            className="min-w-48 flex-1 rounded-md border border-[var(--line)] px-3 py-1.5 text-sm"
+            from={pg.from}
+            to={pg.to}
+            total={total}
           />
         ) : null}
         <div className="flex flex-wrap gap-1.5" role="group" aria-label="Category">
@@ -124,7 +139,7 @@ export function LibraryStandardsTable({
             className="rounded-full border border-[var(--line-strong)] px-3 py-1 text-sm"
             style={!filter.kind ? { background: "#0f2a24", color: "#f7faf7" } : undefined}
           >
-            All {scoped.length}
+            All {allCount}
           </button>
           {kinds.map(([kind, count]) => {
             const tone = kindTone(kind);
@@ -149,7 +164,7 @@ export function LibraryStandardsTable({
         </div>
       </div>
 
-      {visible.length === 0 ? (
+      {shown.length === 0 ? (
         <p className="rounded-xl border border-[var(--line)] bg-white p-4 text-sm text-[var(--muted)]">{emptyLabel}</p>
       ) : (
         <>
@@ -195,18 +210,7 @@ export function LibraryStandardsTable({
               </tbody>
             </table>
           </div>
-          <div className="flex items-center justify-between text-xs text-[var(--muted)]">
-            <span>
-              {capped && shown.length >= visible.length
-                ? `Showing first ${shown.length.toLocaleString()} of ${total.toLocaleString()} — search or pick a TC to narrow.`
-                : `Showing ${shown.length.toLocaleString()} of ${total.toLocaleString()}`}
-            </span>
-            {shown.length < visible.length ? (
-              <button type="button" className="text-sm underline" onClick={() => setLimit((value) => value + PAGE)}>
-                Show more
-              </button>
-            ) : null}
-          </div>
+          <LinePager page={pg.page} pageCount={pg.pageCount} onPage={goPage} />
         </>
       )}
     </section>
