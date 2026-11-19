@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
 import { isLocale, type Locale } from "@/lib/i18n";
 import { prisma } from "@/lib/db";
-import { loadLibraryInstitutions } from "@/lib/library";
+import { libraryMemberStates, loadLibraryInstitutions } from "@/lib/library";
 import { ClientRedirect } from "@/components/admin/client-redirect";
 import { RoleRequestForm } from "./role-request-form";
 
@@ -20,8 +20,9 @@ export default async function LibraryRequestPage({
   const session = await getSessionUser();
   if (!session) return <ClientRedirect href={`/${locale}/login?next=/${locale}/library/request`} />;
   const sp = await searchParams;
-  const [institutions, pending] = await Promise.all([
+  const [institutions, countries, pending] = await Promise.all([
     loadLibraryInstitutions(),
+    libraryMemberStates(),
     prisma.libraryAccessRequest.findFirst({
       where: { userId: session.userId, status: "PENDING" },
       include: { organization: true, memberState: true },
@@ -48,13 +49,8 @@ export default async function LibraryRequestPage({
             alsoCertifies: org.alsoCertifies,
             homeCountryId: org.memberStateId,
             homeCountryName: org.memberState?.name || "",
-            countries:
-              org.backing === "PRIVATE"
-                ? org.operatingCountries.map((row) => ({ id: row.memberState.id, name: row.memberState.name }))
-                : org.memberState
-                  ? [{ id: org.memberState.id, name: org.memberState.name }]
-                  : [],
           }))}
+          countries={countries.map((country) => ({ id: country.id, name: `${country.name} (${country.iso2})` }))}
           organizationId={sp.organizationId || ""}
           memberStateId={sp.memberStateId || ""}
         />

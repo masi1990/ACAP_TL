@@ -33,13 +33,18 @@ export function isLibraryInstitution(org: {
 }
 
 export function countryAllowed(
-  org: { type: string; backing: string; memberStateId: string | null; operatingCountries: { memberStateId: string }[] },
+  _org: { type: string; backing: string; memberStateId: string | null; operatingCountries: { memberStateId: string }[] },
   memberStateId: string,
 ) {
-  if (org.type === "CB" && org.backing === "PRIVATE") {
-    return org.operatingCountries.some((row) => row.memberStateId === memberStateId);
-  }
-  return org.memberStateId === memberStateId;
+  // Country pickers list the full AU member-state catalogue, not only the institution home country.
+  return Boolean(String(memberStateId || "").trim());
+}
+
+export async function libraryMemberStates() {
+  return prisma.memberState.findMany({
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, iso2: true },
+  });
 }
 
 export async function loadLibraryInstitutions() {
@@ -108,7 +113,8 @@ export async function appointStandardsOfficer(input: {
     include: { operatingCountries: true },
   });
   if (!org || !isLibraryInstitution(org)) throw new Error("Choose an active standards body or certification body");
-  if (!countryAllowed(org, input.memberStateId)) throw new Error("Choose a country this institution covers");
+  const memberState = await prisma.memberState.findUnique({ where: { id: input.memberStateId } });
+  if (!memberState || !countryAllowed(org, input.memberStateId)) throw new Error("Choose a country");
 
   await grantOrgRole({
     userId: input.userId,
@@ -229,7 +235,8 @@ export async function sendStandardRelease(input: {
     include: { operatingCountries: true, memberState: true },
   });
   if (!org || !isLibraryInstitution(org)) throw new Error("Choose an active standards body or certification body");
-  if (!countryAllowed(org, input.memberStateId)) throw new Error("Choose a country this institution covers");
+  const memberState = await prisma.memberState.findUnique({ where: { id: input.memberStateId } });
+  if (!memberState || !countryAllowed(org, input.memberStateId)) throw new Error("Choose a country");
   const ids = [...new Set(input.standardIds.map((id) => id.trim()).filter(Boolean))];
   if (!ids.length) throw new Error("Select at least one standard");
   const standards = await prisma.standard.findMany({

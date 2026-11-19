@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { locales, t, type Locale } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { FontSizeControl } from "@/components/font-size-control";
 import { useStoreCart } from "@/lib/store-cart";
+import { apiFetch } from "@/lib/base-path";
 
 export type HeaderLink = { id: string; href: string; label: string };
 export type HeaderGroup = { id: string; label: string; links: HeaderLink[] };
@@ -29,10 +30,13 @@ export function SiteHeader({
   groups: HeaderGroup[];
 }) {
   const pathname = usePathname() || "";
+  const searchParams = useSearchParams();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const cartCount = useStoreCart().length;
   const base = pathname.replace(/^\/(en|fr|pt|ar)/, "") || "";
+  const query = searchParams?.toString();
+  const querySuffix = query ? `?${query}` : "";
   const homeHref = `/${locale}`;
   const flat = groups.flatMap((group) => group.links);
   const activeHref = flat
@@ -41,7 +45,7 @@ export function SiteHeader({
 
   async function signOut() {
     setBusy(true);
-    await fetch("/api/auth/logout", { method: "POST" });
+    await apiFetch("/api/auth/logout", { method: "POST" });
     setBusy(false);
     router.push(`/${locale}/login`);
     router.refresh();
@@ -92,7 +96,7 @@ export function SiteHeader({
               return (
                 <Link
                   key={code}
-                  href={`/${code}${base}`}
+                  href={`/${code}${base}${querySuffix}`}
                   hrefLang={code}
                   aria-current={selected ? "true" : undefined}
                   className={cn(

@@ -7,6 +7,7 @@ import { isLocale, type Locale } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { apiFetch } from "@/lib/base-path";
 
 function ResetForm() {
   const params = useParams();
@@ -23,7 +24,7 @@ function ResetForm() {
     event.preventDefault();
     setLoading(true);
     setError(null);
-    const res = await fetch("/api/auth/reset-password", {
+    const res = await apiFetch("/api/auth/reset-password", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token, password }),

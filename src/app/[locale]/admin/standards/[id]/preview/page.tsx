@@ -63,7 +63,7 @@ export default async function AdminStandardFullPreviewPage({
       </div>
       <div
         className="overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)]"
-        style={{ height: "min(78vh, 900px)" }}
+        style={{ height: "min(86vh, 1100px)" }}
       >
         <FullPreviewViewer data={data} closeHref={`/${locale}/admin/standards`} />
       </div>

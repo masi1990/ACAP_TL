@@ -4,6 +4,7 @@ import { hashPassword } from "@/lib/auth";
 import { appendAuditEvent } from "@/lib/audit";
 import { isCountryCode } from "@/lib/countries";
 import { replaceOrgRole } from "@/lib/org-accounts";
+import { isValidEmail } from "@/lib/utils";
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
@@ -18,7 +19,9 @@ export async function POST(req: NextRequest) {
   if (!name || !organizationName) {
     return NextResponse.json({ error: "Name and organisation are required" }, { status: 400 });
   }
-  if (!email.includes("@")) return NextResponse.json({ error: "Email is required" }, { status: 400 });
+  if (!isValidEmail(email)) {
+    return NextResponse.json({ error: "Enter a valid email address" }, { status: 400 });
+  }
   if (password.length < 8) {
     return NextResponse.json({ error: "Choose a password of at least 8 characters" }, { status: 400 });
   }

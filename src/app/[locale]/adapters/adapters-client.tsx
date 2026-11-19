@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { apiFetch } from "@/lib/base-path";
 
 export function AdaptersClient({
   locale,
@@ -28,7 +29,7 @@ export function AdaptersClient({
   async function drain() {
     setBusy(true);
     setMsg(null);
-    const res = await fetch(`/api/adapters/${encodeURIComponent(rec)}`, {
+    const res = await apiFetch(`/api/adapters/${encodeURIComponent(rec)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "drain_outbox" }),
@@ -42,7 +43,7 @@ export function AdaptersClient({
   async function offlineCache() {
     setBusy(true);
     setMsg(null);
-    const res = await fetch("/api/adapters/offline-cache", {
+    const res = await apiFetch("/api/adapters/offline-cache", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ entryPointCode: "KE-NAMANGA" }),

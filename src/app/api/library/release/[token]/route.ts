@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { SESSION_COOKIE, SESSION_COOKIE_MAX_AGE_S, createSession, hashPassword } from "@/lib/auth";
+import {
+  SESSION_COOKIE,
+  SESSION_COOKIE_MAX_AGE_S,
+  SESSION_COOKIE_PATH,
+  createSession,
+  hashPassword,
+} from "@/lib/auth";
 import { appendAuditEvent } from "@/lib/audit";
 import { appointStandardsOfficer, logLibraryActivity } from "@/lib/library";
 
@@ -54,7 +60,7 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   res.cookies.set(SESSION_COOKIE, session.token, {
     httpOnly: true,
     sameSite: "lax",
-    path: "/",
+    path: SESSION_COOKIE_PATH,
     maxAge: SESSION_COOKIE_MAX_AGE_S,
   });
   return res;

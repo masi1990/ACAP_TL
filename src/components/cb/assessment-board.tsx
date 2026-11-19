@@ -9,6 +9,7 @@ import { CrudForm } from "@/components/admin/crud-form";
 import { notifyCrud } from "@/components/ui/crud-notice";
 import { countryOptions } from "@/lib/countries";
 import { ANNEX_SOURCES, DOSSIER_ANNEXES, dossierGaps, INTERNAL_CERTIFICATE_KIND } from "@/lib/dossier";
+import { apiFetch, withBasePath } from "@/lib/base-path";
 
 export type BoardItem = {
   id: string;
@@ -142,7 +143,7 @@ export function AssessmentBoard({
   }
 
   async function saveDossier() {
-    const res = await fetch("/api/cb/assessment", {
+    const res = await apiFetch("/api/cb/assessment", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mode: "dossier", applicationId, ...fields }),
@@ -156,7 +157,7 @@ export function AssessmentBoard({
   }
 
   async function saveRows() {
-    const res = await fetch("/api/cb/assessment", {
+    const res = await apiFetch("/api/cb/assessment", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -214,7 +215,7 @@ export function AssessmentBoard({
       setBusy(false);
       return;
     }
-    const res = await fetch("/api/cb/certificate", {
+    const res = await apiFetch("/api/cb/certificate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ applicationId }),
@@ -234,7 +235,7 @@ export function AssessmentBoard({
     const data = new FormData();
     data.set("assessmentItemId", itemId);
     data.set("file", file);
-    const res = await fetch("/api/cb/evidence", { method: "POST", body: data });
+    const res = await apiFetch("/api/cb/evidence", { method: "POST", body: data });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
       fail(body.error || "Could not attach the laboratory file");
@@ -260,7 +261,7 @@ export function AssessmentBoard({
     data.set("applicationId", applicationId);
     data.set("annexCode", code);
     data.set("file", file);
-    const res = await fetch("/api/cb/evidence", { method: "POST", body: data });
+    const res = await apiFetch("/api/cb/evidence", { method: "POST", body: data });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
       fail(body.error || "Could not attach the annex");
@@ -280,7 +281,7 @@ export function AssessmentBoard({
     data.set("applicationId", applicationId);
     data.set("kind", INTERNAL_CERTIFICATE_KIND);
     data.set("file", file);
-    const res = await fetch("/api/cb/evidence", { method: "POST", body: data });
+    const res = await apiFetch("/api/cb/evidence", { method: "POST", body: data });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
       fail(body.error || "Could not attach the scanned certificate");
@@ -311,7 +312,7 @@ export function AssessmentBoard({
     data.set("applicationId", applicationId);
     data.set("title", title);
     data.set("file", file);
-    const res = await fetch("/api/cb/evidence", { method: "POST", body: data });
+    const res = await apiFetch("/api/cb/evidence", { method: "POST", body: data });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
       fail(body.error || "Could not attach the document");
@@ -392,7 +393,7 @@ export function AssessmentBoard({
       {standard.length === 0 && (
         <CrudForm
           idPrefix="load-"
-          action="/api/cb/assessment"
+          action={withBasePath("/api/cb/assessment")}
           submitLabel="Load requirements from the standard"
           fields={[
             { name: "mode", label: "Mode", defaultValue: "load", hidden: true },
@@ -508,8 +509,9 @@ export function AssessmentBoard({
             Country rules differ. Add the name and description for the destination country.
           </p>
           <CrudForm
+            searchable
             idPrefix="nat-"
-            action="/api/cb/assessment"
+            action={withBasePath("/api/cb/assessment")}
             submitLabel="Add national regulation"
             fields={[
               { name: "mode", label: "Mode", defaultValue: "add", hidden: true },
@@ -531,7 +533,7 @@ export function AssessmentBoard({
           <h3 className="font-semibold">Add an other requirement</h3>
           <CrudForm
             idPrefix="other-"
-            action="/api/cb/assessment"
+            action={withBasePath("/api/cb/assessment")}
             submitLabel="Add other requirement"
             fields={[
               { name: "mode", label: "Mode", defaultValue: "add", hidden: true },
@@ -557,7 +559,7 @@ export function AssessmentBoard({
                 <div>
                   <div className="text-sm font-medium">{annex.title}</div>
                   {current && (
-                    <a className="text-sm text-[var(--accent)] underline" href={`/api/cb/files/${current.id}`}>
+                    <a className="text-sm text-[var(--accent)] underline" href={withBasePath(`/api/cb/files/${current.id}`)}>
                       {current.filename}
                     </a>
                   )}
@@ -601,7 +603,7 @@ export function AssessmentBoard({
                 <li key={file.id}>
                   <span className="font-medium">{file.title}</span>
                   {" · "}
-                  <a className="text-[var(--accent)] underline" href={`/api/cb/files/${file.id}`}>
+                  <a className="text-[var(--accent)] underline" href={withBasePath(`/api/cb/files/${file.id}`)}>
                     {file.filename}
                   </a>
                 </li>
@@ -641,7 +643,7 @@ export function AssessmentBoard({
           {files
             .filter((file) => file.kind === INTERNAL_CERTIFICATE_KIND)
             .map((file) => (
-              <a key={file.id} className="inline-flex text-sm text-[var(--accent)] underline" href={`/api/cb/files/${file.id}`}>
+              <a key={file.id} className="inline-flex text-sm text-[var(--accent)] underline" href={withBasePath(`/api/cb/files/${file.id}`)}>
                 {file.filename}
               </a>
             ))}

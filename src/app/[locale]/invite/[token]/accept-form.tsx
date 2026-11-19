@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { apiFetch, withBasePath } from "@/lib/base-path";
 
 export function AcceptInviteForm({
   token,
@@ -25,7 +26,7 @@ export function AcceptInviteForm({
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const res = await fetch("/api/auth/accept-invite", {
+    const res = await apiFetch("/api/auth/accept-invite", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token, name, password }),
@@ -36,7 +37,7 @@ export function AcceptInviteForm({
       setError(data.error || "Could not accept the invitation");
       return;
     }
-    window.location.assign(`/${locale}/dashboard`);
+    window.location.assign(withBasePath(`/${locale}/dashboard`));
   }
 
   return (

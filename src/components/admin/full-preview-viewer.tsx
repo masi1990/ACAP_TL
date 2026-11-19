@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { withBasePath } from "@/lib/base-path";
 import type { AdminFullStandardPreview } from "@/lib/admin-standard-preview";
 
 /** Authenticated full-standard viewer — no Clause-2 blur / lock. */
@@ -123,22 +124,25 @@ export function FullPreviewViewer({
         )}
       </aside>
 
-      <div className="flex min-h-0 flex-1 flex-col bg-[#3d4449] p-3 sm:p-5">
-        <div className="mx-auto flex w-full max-w-[720px] flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col bg-[#3d4449] p-2 sm:p-4">
+        <div className="mx-auto flex h-full min-h-0 w-full max-w-none flex-1 flex-col">
           <div
-            className="relative min-h-0 flex-1 overflow-y-auto rounded-[2px] bg-[#2a2d30] shadow-lg"
+            className="relative min-h-0 flex-1 overflow-auto rounded-[2px] bg-[#2a2d30] shadow-lg"
             onContextMenu={viewOnly ? (event) => event.preventDefault() : undefined}
           >
             {usePdf && page ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={page.imageUrl}
-                alt={`${data.editionLabel} — ${page.label}`}
-                draggable={false}
-                className="mx-auto block h-auto w-full max-w-[640px] bg-white"
-              />
+              <div className="flex min-h-full w-full justify-center p-3 sm:p-5">
+                {/* Exact published A4 page — no crop/reflow; scroll if needed */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={withBasePath(page.imageUrl)}
+                  alt={`${data.editionLabel} — ${page.label}`}
+                  draggable={false}
+                  className="mx-auto block h-auto w-[min(100%,960px)] min-w-0 bg-white object-contain shadow-md md:min-w-[min(100%,780px)]"
+                />
+              </div>
             ) : htmlPage ? (
-              <div className="min-h-[480px] bg-[#f7f4ee] px-8 py-10 text-[#1a1a1a]">
+              <div className="mx-auto min-h-[640px] w-full max-w-[860px] bg-[#f7f4ee] px-8 py-10 text-[#1a1a1a]">
                 {htmlPage.kind === "cover" && (
                   <div className="space-y-4 text-center">
                     <p className="text-xs uppercase tracking-[0.2em] text-[#1a1a1a]">{htmlPage.content.org}</p>

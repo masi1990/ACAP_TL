@@ -5,10 +5,12 @@ import { requirePermission } from "@/lib/require-auth";
 import { appendAuditEvent } from "@/lib/audit";
 import { orgStatusOrNull } from "@/lib/cb-profile";
 import { AUTHORITY_TYPES, isAuthorityType, isTradeOrgType } from "@/lib/rbac";
+import { isCountryCode } from "@/lib/countries";
 import { notifyAfterCommit, queueAccountWelcome } from "@/lib/notifications";
 import { saveCbMarkLicences } from "@/lib/cb-licenses";
 import { replaceOrgRole } from "@/lib/org-accounts";
 import { resolveInstitutionShape, saveCompanyCountries, saveOperatingCountries } from "@/lib/institution-shape";
+import { isValidEmail } from "@/lib/utils";
 
 function profileFrom(body: Record<string, unknown>) {
   const status =
@@ -99,6 +101,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Choose a member state from the list" }, { status: 400 });
   }
 
+  const tradeCountryIso2 = isTrade
+    ? (String(body.countryIso2 || "").trim() || memberState?.iso2 || "").toUpperCase().slice(0, 2)
+    : "";
+  if (isTrade && (!tradeCountryIso2 || !isCountryCode(tradeCountryIso2))) {
+    return NextResponse.json({ error: "Choose a country" }, { status: 400 });
+  }
+
   const profile = profileFrom(body);
   if (profile.error) return NextResponse.json({ error: profile.error }, { status: 400 });
 
@@ -114,6 +123,9 @@ export async function POST(req: NextRequest) {
   const adminEmail = body.adminEmail ? String(body.adminEmail).trim().toLowerCase() : null;
   const adminName = body.adminName ? String(body.adminName).trim() : name + " Admin";
   const adminPassword = body.adminPassword ? String(body.adminPassword) : "ChangeMe!ACAP";
+  if (adminEmail && !isValidEmail(adminEmail)) {
+    return NextResponse.json({ error: "Enter a valid email address" }, { status: 400 });
+  }
 
   let primaryAdminId: string | undefined;
   let createdAccount = false;
@@ -185,7 +197,7 @@ export async function POST(req: NextRequest) {
       data: {
         clientAccountId: client.id,
         legalName: String(body.legalName || name),
-        countryIso2: (memberState?.iso2 || String(body.countryIso2 || "")).toUpperCase().slice(0, 2) || "KE",
+        countryIso2: tradeCountryIso2,
       },
     });
     const company = await prisma.company.findFirst({ where: { clientAccountId: client.id } });

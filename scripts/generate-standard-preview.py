@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Rasterize a standard PDF into free (Clause 1 only) + locked/blurred preview pages."""
+"""Rasterize a standard PDF for store/admin preview.
+
+Public mode (all standards): starting pages through Clause 1 Scope inclusive.
+Clause 2+ pages are omitted. If Scope shares a page with Clause 2, crop below Scope.
+Full mode: every page exact and unlocked (admin / free-to-read).
+"""
 from __future__ import annotations
 
 import json
@@ -11,7 +16,7 @@ try:
     import pymupdf as fitz
 except ImportError:
     import fitz  # type: ignore
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from standard_text import (  # noqa: E402
@@ -24,6 +29,7 @@ from standard_text import (  # noqa: E402
     is_toc_line,
     is_toc_page,
     logical_line,
+    scope_page_label,
 )
 
 CLAUSE2_NEEDLES = (
@@ -35,37 +41,6 @@ CLAUSE2_NEEDLES = (
     "المراجع المعيارية",
     "المراجع القياسية",
 )
-
-
-def find_clause2_y(page) -> float | None:
-    """Y just above Clause 2 (normative references), in any published language."""
-    ys: list[float] = []
-    number_ys: list[float] = []
-    for needle in CLAUSE2_NEEDLES:
-        for hit in page.search_for(needle):
-            if hit.x0 < 420:
-                ys.append(float(hit.y0))
-    for block in page.get_text("dict").get("blocks", []):
-        if block.get("type") != 0:
-            continue
-        for line in block.get("lines", []):
-            text = " ".join(span["text"] for span in line.get("spans", [])).strip()
-            if not text or is_toc_line(text):
-                continue
-            logical = logical_line(text)
-            folded = fold_latin(logical)
-            y0 = float(line["bbox"][1])
-            if re.fullmatch(r"2(?:\.0)?", folded):
-                number_ys.append(y0)
-            elif any(phrase in folded for phrase in CLAUSE2_PHRASES) or any(phrase in logical for phrase in ARABIC_CLAUSE2):
-                ys.append(y0)
-    if not ys:
-        return None
-    cut = min(ys)
-    above = [y for y in number_ys if cut - 80 <= y < cut]
-    if above:
-        cut = min(above)
-    return cut
 
 
 def find_scope_page(doc) -> int | None:
@@ -89,114 +64,110 @@ def find_scope_page(doc) -> int | None:
     return scored[0][1]
 
 
-def render(page, zoom: float = 2.0) -> Image.Image:
+def find_clause2_y(page) -> float | None:
+    """Y just above Clause 2 (normative references), in any published language."""
+    ys: list[float] = []
+    number_ys: list[float] = []
+    for needle in CLAUSE2_NEEDLES:
+        for hit in page.search_for(needle):
+            if hit.x0 < 420:
+                ys.append(float(hit.y0))
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            text = " ".join(span["text"] for span in line.get("spans", [])).strip()
+            if not text or is_toc_line(text):
+                continue
+            logical = logical_line(text)
+            folded = fold_latin(logical)
+            y0 = float(line["bbox"][1])
+            if re.fullmatch(r"2(?:\.0)?", folded):
+                number_ys.append(y0)
+            elif any(phrase in folded for phrase in CLAUSE2_PHRASES) or any(
+                phrase in logical for phrase in ARABIC_CLAUSE2
+            ):
+                ys.append(y0)
+    if not ys:
+        return None
+    cut = min(ys)
+    above = [y for y in number_ys if cut - 80 <= y < cut]
+    if above:
+        cut = min(above)
+    return cut
+
+
+def render(page, zoom: float = 2.75) -> Image.Image:
+    """Render the full PDF page media box at high resolution for readability."""
     mat = fitz.Matrix(zoom, zoom)
-    pix = page.get_pixmap(matrix=mat, alpha=False)
+    pix = page.get_pixmap(matrix=mat, alpha=False, annots=True)
     return Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
 
-def blur_locked(img: Image.Image) -> Image.Image:
-    blurred = img.filter(ImageFilter.GaussianBlur(radius=22))
-    overlay = Image.new("RGB", img.size, (35, 35, 35))
-    return Image.blend(blurred, overlay, 0.3)
+def scope_page_image(page, zoom: float = 2.75) -> Image.Image:
+    """Scope page as published; blank any Clause 2+ text that shares the page."""
+    img = render(page, zoom)
+    cut_y = find_clause2_y(page)
+    if cut_y is None:
+        return img
+    crop_h = max(120, int(cut_y * zoom) - 8)
+    crop_h = min(crop_h, img.height)
+    out = Image.new("RGB", img.size, (255, 255, 255))
+    out.paste(img.crop((0, 0, img.width, crop_h)), (0, 0))
+    return out
 
 
-def generate_public_preview(doc, out_dir: Path, zoom: float = 2.0) -> dict:
-    """Clause-1-only free pages; later pages blurred/locked (public store)."""
+def generate_public_preview(doc, out_dir: Path, zoom: float = 2.75) -> dict:
+    """Starting pages through Clause 1 Scope inclusive; Clause 2+ omitted."""
     scope_idx = find_scope_page(doc)
+    last_free = scope_idx if scope_idx is not None else 0
     pages_meta = []
+    scope_text = doc[scope_idx].get_text("text") if scope_idx is not None else ""
+    clause1_label = scope_page_label(scope_text) if scope_text else "1 Scope"
 
-    for i, page in enumerate(doc):
+    for i in range(last_free + 1):
+        page = doc[i]
         n = i + 1
-        img = render(page, zoom)
-        label = "Cover" if i == 0 else f"Page {n}"
-        image_name = f"page-{n:02d}.png"
-        before_scope = scope_idx is not None and i < scope_idx
-
-        if before_scope:
-            img.save(out_dir / image_name, "PNG")
-            pages_meta.append(
-                {
-                    "n": n,
-                    "label": label,
-                    "access": "free",
-                    "image": image_name,
-                    "note": None,
-                }
-            )
-            continue
-
-        if i == scope_idx:
-            cut_y = find_clause2_y(page)
-            blur_locked(img).save(out_dir / image_name, "PNG")
-            if cut_y is None and has_clause2_heading(page.get_text("text")):
-                pages_meta.append(
-                    {
-                        "n": n,
-                        "label": f"Page {n} (Clause 2+ locked)",
-                        "access": "locked",
-                        "image": image_name,
-                        "note": "Clause 2 and later text are locked.",
-                    }
-                )
-                continue
-            if cut_y is None:
-                scope_img = img
+        if scope_idx is not None and i == scope_idx:
+            img = scope_page_image(page, zoom)
+            label = clause1_label
+        else:
+            img = render(page, zoom)
+            if i == 0:
+                label = "Cover"
+            elif is_toc_page(page.get_text("text")):
+                label = "Contents"
             else:
-                crop_h = max(80, int(cut_y * zoom) - 10)
-                scope_img = img.crop((0, 0, img.width, min(crop_h, img.height)))
-            canvas = Image.new("RGB", (img.width, scope_img.height + 90), (255, 255, 255))
-            canvas.paste(scope_img, (0, 0))
-            draw = ImageDraw.Draw(canvas)
-            draw.rectangle(
-                [32, scope_img.height + 18, img.width - 32, scope_img.height + 70],
-                fill=(15, 42, 36),
-            )
-            scope_name = f"page-{n:02d}-scope-only.png"
-            canvas.save(out_dir / scope_name, "PNG")
-            pages_meta.append(
-                {
-                    "n": n,
-                    "label": "1 Scope (Clause 1 only)",
-                    "access": "free",
-                    "image": scope_name,
-                    "note": "Free preview ends after Clause 1 Scope. Clause 2+ is not shown.",
-                    "scopeOnly": True,
-                }
-            )
-            pages_meta.append(
-                {
-                    "n": n + 0.1,
-                    "label": f"Page {n} (Clause 2+ locked)",
-                    "access": "locked",
-                    "image": image_name,
-                    "note": "Clause 2 and later text are locked.",
-                }
-            )
-            continue
-
-        blur_locked(img).save(out_dir / image_name, "PNG")
+                label = f"Page {n}"
+        image_name = f"page-{n:02d}.png"
+        img.save(out_dir / image_name, "PNG")
         pages_meta.append(
             {
                 "n": n,
-                "label": f"{label} (locked)",
-                "access": "locked",
+                "label": label,
+                "access": "free",
                 "image": image_name,
                 "note": None,
+                **({"scopeOnly": True} if scope_idx is not None and i == scope_idx else {}),
             }
         )
+
+    # Full extracted text so Node can build TOC / Clause 1 HTML in the PDF's language.
+    full_text = "\n".join(page.get_text("text") for page in doc)
+    (out_dir / "preview-text.txt").write_text(full_text, encoding="utf-8")
 
     return {
         "pageCount": len(doc),
         "scopePage": 0 if scope_idx is None else scope_idx + 1,
         "mode": "public",
-        "cutoff": "clause-1-i18n",
+        "cutoff": "start-through-clause1",
+        "scopeLabel": clause1_label,
         "pages": pages_meta,
     }
 
 
-def generate_full_preview(doc, out_dir: Path, zoom: float = 2.0) -> dict:
-    """All pages clear and unlocked — authenticated admin full-standard preview."""
+def generate_full_preview(doc, out_dir: Path, zoom: float = 2.75) -> dict:
+    """All pages clear and unlocked — authenticated admin / free-to-read preview."""
     pages_meta = []
     for i, page in enumerate(doc):
         n = i + 1
@@ -210,7 +181,7 @@ def generate_full_preview(doc, out_dir: Path, zoom: float = 2.0) -> dict:
                 "label": label,
                 "access": "free",
                 "image": image_name,
-                "note": "Full standard — authenticated admin preview",
+                "note": None,
             }
         )
     return {

@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { apiFetch } from "@/lib/base-path";
+import { isValidEmail } from "@/lib/utils";
 
 export default function LibraryRegisterPage() {
   const params = useParams<{ locale: string }>();
@@ -15,12 +17,18 @@ export default function LibraryRegisterPage() {
     setBusy(true);
     setError("");
     const form = new FormData(event.currentTarget);
-    const res = await fetch("/api/library/register", {
+    const email = String(form.get("email") || "");
+    if (!isValidEmail(email)) {
+      setBusy(false);
+      setError("Enter a valid email address");
+      return;
+    }
+    const res = await apiFetch("/api/library/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: form.get("name"),
-        email: form.get("email"),
+        email,
         password: form.get("password"),
       }),
     });

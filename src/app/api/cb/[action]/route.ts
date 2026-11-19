@@ -16,6 +16,7 @@ import { hashPassword } from "@/lib/auth";
 import { replaceOrgRole } from "@/lib/org-accounts";
 import { issuePasswordReset } from "@/lib/password-reset";
 import { notifyAfterCommit } from "@/lib/notifications";
+import { isValidEmail } from "@/lib/utils";
 
 type Ctx = { params: Promise<{ action: string }> };
 
@@ -143,7 +144,7 @@ async function addClient(session: AuthedSession, body: Record<string, unknown>) 
   const email = String(body.email || "").toLowerCase().trim();
   const cbId = actingCbId(session, String(body.cbOrganizationId || ""));
   if (!name) return fail("Client name is required");
-  if (!email.includes("@")) return fail("Account email is required");
+  if (!isValidEmail(email)) return fail("Enter a valid email address");
   if (type !== "MANUFACTURER" && type !== "IMPORTER") {
     return fail("Client must be a manufacturer or an importer");
   }

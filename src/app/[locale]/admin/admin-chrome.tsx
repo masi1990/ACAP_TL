@@ -103,6 +103,11 @@ export async function AdminChrome({
       label: t(locale, "Audit"),
       show: systemAdmin && can(session.user, "audit:read"),
     },
+    {
+      href: `/${locale}/admin/health`,
+      label: "Server health",
+      show: systemAdmin && can(session.user, "audit:read"),
+    },
   ].filter((n) => n.show);
 
   return (

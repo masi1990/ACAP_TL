@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SearchSelect } from "@/components/ui/search-select";
+import { apiFetch } from "@/lib/base-path";
+import { isValidEmail } from "@/lib/utils";
 
 export function RegisterForm({
   locale,
@@ -29,13 +31,17 @@ export function RegisterForm({
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
+    if (!isValidEmail(email)) {
+      setError("Enter a valid email address");
+      return;
+    }
     if (!countryIso2) {
       setError("Choose a country");
       return;
     }
     setLoading(true);
     setError(null);
-    const res = await fetch("/api/auth/register", {
+    const res = await apiFetch("/api/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, email, password, organizationName, type, countryIso2, certifyingCbId }),

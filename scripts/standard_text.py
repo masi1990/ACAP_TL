@@ -157,3 +157,49 @@ def is_toc_page(text: str) -> bool:
         if any(logical == heading or logical.startswith(heading + " ") for heading in ARABIC_TOC):
             return True
     return text.count("...") >= 3 or text.count("…") >= 3
+
+
+SCOPE_PAGE_LABELS = {
+    "en": "1 Scope",
+    "fr": "1 Champ d'application",
+    "pt": "1 Campo de aplicação",
+    "ar": "1 نطاق التطبيق",
+}
+
+
+def detect_edition_locale(text: str) -> str:
+    """Best-effort language of a Clause 1 page (EN / FR / PT / AR)."""
+    logical = logical_text(text)
+    if _arabic_ratio(logical) >= 0.35 or any(h in logical for h in ARABIC_SCOPE_HEADINGS):
+        return "ar"
+    folded = fold_latin(logical)
+    # Do not match English "specifies" via the French stem "specifie".
+    if any(
+        h in folded
+        for h in (
+            "champ d'application",
+            "domaine d'application",
+            "objet et domaine d'application",
+            "references normatives",
+        )
+    ) or bool(re.search(r"\bspecifie\b", folded)):
+        return "fr"
+    if any(
+        h in folded
+        for h in (
+            "campo de aplicacao",
+            "objetivo e campo de aplicacao",
+            "objectivo e campo de aplicacao",
+            "objecto e campo de aplicacao",
+            "ambito de aplicacao",
+            "ambito",
+            "referencias normativas",
+            "aplica-se",
+        )
+    ) or bool(re.search(r"\bespecifica\b|\bestabelece\b", folded)):
+        return "pt"
+    return "en"
+
+
+def scope_page_label(text: str) -> str:
+    return SCOPE_PAGE_LABELS[detect_edition_locale(text)]

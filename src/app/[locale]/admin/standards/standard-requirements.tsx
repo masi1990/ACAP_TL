@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
 import { FullPreviewViewer } from "@/components/admin/full-preview-viewer";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -9,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { SearchSelect } from "@/components/ui/search-select";
 import type { AdminFullStandardPreview } from "@/lib/admin-standard-preview";
 import { clauseInsertIndex } from "@/lib/standard-assessment";
+import { apiFetch } from "@/lib/base-path";
 
 type RequirementItem = {
   itemKey: string;
@@ -44,6 +46,8 @@ export function StandardRequirements({
   canWrite: boolean;
 }) {
   const router = useRouter();
+  const params = useParams();
+  const locale = typeof params.locale === "string" ? params.locale : "en";
   const [standardId, setStandardId] = useState(sets[0]?.id ?? "");
   const [previewOpen, setPreviewOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -65,20 +69,30 @@ export function StandardRequirements({
     setPreview(null);
     setPreviewError(null);
     setPreviewBusy(true);
-    fetch(`/api/admin/standards/${id}/preview`)
+    apiFetch(`/api/admin/standards/${id}/preview`)
       .then(async (res) => {
         const body = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(body.error || "The standard could not be opened");
+        if (!res.ok) {
+          throw new Error(
+            typeof body.error === "string" && body.error
+              ? body.error
+              : `The standard could not be opened (${res.status})`,
+          );
+        }
         return body as AdminFullStandardPreview;
       })
       .then((data) => {
         if (!cancelled) {
           loadedId.current = data.standardId;
           setPreview(data);
+          setPreviewError(null);
         }
       })
       .catch((err: unknown) => {
-        if (!cancelled) setPreviewError(err instanceof Error ? err.message : "The standard could not be opened");
+        if (!cancelled) {
+          loadedId.current = null;
+          setPreviewError(err instanceof Error ? err.message : "The standard could not be opened");
+        }
       })
       .finally(() => {
         if (!cancelled) setPreviewBusy(false);
@@ -119,7 +133,7 @@ export function StandardRequirements({
     setAddError(null);
     setAddBusy(true);
     try {
-      const res = await fetch(`/api/admin/standards/${current.id}/requirements`, {
+      const res = await apiFetch(`/api/admin/standards/${current.id}/requirements`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(clauseForm),
@@ -173,18 +187,32 @@ export function StandardRequirements({
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent
           aria-describedby="standard-preview-desc"
-          className="h-[min(92vh,960px)] w-[min(1200px,calc(100vw-1.5rem))]"
+          className="h-[min(94vh,1100px)] w-[min(1280px,calc(100vw-1rem))] max-w-none"
         >
           <DialogHeader>
             <DialogTitle>Standard preview</DialogTitle>
             <p id="standard-preview-desc" className="mt-1 text-sm text-[var(--muted)]">
-              {current.label}
+              {current.label} — exact published pages (A4)
             </p>
           </DialogHeader>
-          <div className="min-h-0 flex-1 overflow-hidden">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             {previewBusy && <p className="px-5 py-4 text-sm text-[var(--muted)]">Opening the standard…</p>}
-            {previewError && <p className="px-5 py-4 text-sm text-rose-700">{previewError}</p>}
-            {preview && <FullPreviewViewer data={preview} closeHref="#requirements" showBack={false} />}
+            {previewError && (
+              <div className="space-y-3 px-5 py-4 text-sm">
+                <p className="text-rose-700">{previewError}</p>
+                <Link
+                  href={`/${locale}/admin/standards/${current.id}/preview`}
+                  className="inline-flex text-[var(--accent)] underline"
+                >
+                  Open full-page preview
+                </Link>
+              </div>
+            )}
+            {preview ? (
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <FullPreviewViewer data={preview} closeHref="#requirements" showBack={false} />
+              </div>
+            ) : null}
           </div>
         </DialogContent>
       </Dialog>

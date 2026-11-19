@@ -5,7 +5,7 @@ import { assessMachinePackCompleteness } from "../src/lib/fidelity";
 import { buildStandardPreviewPayload } from "../src/lib/standard-preview";
 
 describe("machine pack fidelity", () => {
-  it("ARS 464 sample retains mandatory slices", () => {
+  it("sample machine pack retains mandatory slices", () => {
     const sample = JSON.parse(
       readFileSync(path.join(process.cwd(), "data", "ars-464-sample.json"), "utf8"),
     );
@@ -21,22 +21,38 @@ describe("machine pack fidelity", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("public PDF preview keeps Scope readable and later pages locked", () => {
+  it("public preview is generic — no designation-specific page pack without pdfPages", () => {
     const preview = buildStandardPreviewPayload({
-      editionLabel: "ARS 464:2022",
-      coverTitle: "Milled rice — Specification",
-      scopeEn: "This African Standard specifies requirements for milled rice.",
+      editionLabel: "ARS 9999:2025",
+      coverTitle: "Example product — Specification",
+      scopeEn: "This African Standard specifies requirements for an example product.",
       ics: "67.060",
       publisher: "ARSO",
-      year: 2022,
+      year: 2025,
+      designation: "ARS 9999",
     });
-    expect(preview.pdfPages.length).toBe(17);
-    // Cover→intro + Clause-1 scope-only page are free; Clause 2+ pages locked
-    expect(preview.pdfPages.filter((p) => p.access === "free").length).toBe(7);
-    expect(preview.pdfPages.find((p) => p.label.includes("Scope"))?.access).toBe("free");
-    expect(preview.pdfPages.filter((p) => p.access === "locked").length).toBe(10);
-    expect(preview.tableOfContents.some((t) => t.title === "Scope" && t.includedInPreview)).toBe(
-      true,
-    );
+    // Without a per-standard PDF raster pack, pdfPages stay empty (HTML fallback only).
+    expect(preview.pdfPages).toEqual([]);
+    expect(preview.pages.some((p) => p.kind === "scope")).toBe(true);
+    expect(preview.tableOfContents.filter((t) => t.includedInPreview).map((t) => t.number)).toEqual(["1"]);
+  });
+
+  it("supplied pdfPages are used as-is for that standard", () => {
+    const preview = buildStandardPreviewPayload({
+      editionLabel: "ARS 1000:2024",
+      coverTitle: "Widget — Specification",
+      scopeEn: "This African Standard specifies requirements for widgets.",
+      ics: "01.040",
+      publisher: "ARSO",
+      year: 2024,
+      designation: "ARS 1000",
+      pdfPages: [
+        { n: 1, label: "Cover", access: "free", imageUrl: "/uploads/standards/preview/x/page-01.png" },
+        { n: 2, label: "1 Scope", access: "free", imageUrl: "/uploads/standards/preview/x/page-02.png" },
+      ],
+    });
+    expect(preview.pdfPages).toHaveLength(2);
+    expect(preview.pdfPages.every((p) => p.access === "free")).toBe(true);
+    expect(preview.pdfPages.some((p) => p.imageUrl.includes("ars-464"))).toBe(false);
   });
 });

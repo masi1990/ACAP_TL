@@ -1,5 +1,5 @@
-import { randomBytes } from "crypto";
-import { mkdir, writeFile } from "fs/promises";
+import { createHash, randomBytes } from "crypto";
+import { mkdir, readFile, writeFile } from "fs/promises";
 import path from "path";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
@@ -9,6 +9,27 @@ import {
   parseIdList,
   type LanguageCode,
 } from "@/lib/standard-kinds";
+
+function sha256(buf: Buffer) {
+  return createHash("sha256").update(buf).digest("hex");
+}
+
+async function bufferFromUpload(file: File): Promise<Buffer> {
+  return Buffer.from(await file.arrayBuffer());
+}
+
+/** Reject “other language” uploads that are the same bytes as the authoritative PDF. */
+export function duplicateLanguagePdfError(label: string, authoritativeLocale: string) {
+  const auth =
+    authoritativeLocale === "fr"
+      ? "French"
+      : authoritativeLocale === "pt"
+        ? "Portuguese"
+        : authoritativeLocale === "ar"
+          ? "Arabic"
+          : "English";
+  return `${label} is identical to the authoritative ${auth} PDF. Upload a real ${label.replace(/ PDF$/i, "")} edition, or leave that field empty.`;
+}
 
 export {
   adoptionRate,
@@ -82,18 +103,32 @@ export async function replaceStandardAdoptions(standardId: string, memberStateId
   }
 }
 
-export async function storeStandardPdf(file: File): Promise<string> {
+export async function storeStandardPdf(file: File, preloaded?: Buffer): Promise<string> {
   const name = file.name.toLowerCase();
   if (!name.endsWith(".pdf") && file.type !== "application/pdf") {
     throw new Error("Language editions must be PDF files");
   }
-  if (file.size > 40 * 1024 * 1024) throw new Error("File too large (40MB max)");
+  const buf = preloaded ?? (await bufferFromUpload(file));
+  if (buf.byteLength > 40 * 1024 * 1024) throw new Error("File too large (40MB max)");
   const uploadsDir = path.join(process.cwd(), "public", "uploads", "standards");
   await mkdir(uploadsDir, { recursive: true });
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   const storedName = `${Date.now()}-${randomBytes(3).toString("hex")}-${safeName}`;
-  await writeFile(path.join(uploadsDir, storedName), Buffer.from(await file.arrayBuffer()));
+  await writeFile(path.join(uploadsDir, storedName), buf);
   return `/uploads/standards/${storedName}`;
+}
+
+async function authoritativePdfHash(versionId: string, authLocale: string, files: Partial<Record<LanguageCode, File>>) {
+  const authUpload = files[authLocale as LanguageCode];
+  if (authUpload) return sha256(await bufferFromUpload(authUpload));
+  const version = await prisma.standardVersion.findUnique({ where: { id: versionId } });
+  const uri = version?.sourcePdfUri;
+  if (!uri) return null;
+  try {
+    return sha256(await readFile(path.join(process.cwd(), "public", uri.replace(/^\//, ""))));
+  } catch {
+    return null;
+  }
 }
 
 export async function attachLanguageFiles(
@@ -102,20 +137,42 @@ export async function attachLanguageFiles(
   authoritativeLocale: string,
 ) {
   const locale = authoritativeLocaleOrNull(authoritativeLocale) || "en";
+  const authHash = await authoritativePdfHash(versionId, locale, files);
+  const stored: Array<{ locale: LanguageCode; sourcePdfUri: string }> = [];
   for (const item of LANGUAGE_FILE_FIELDS) {
     const file = files[item.locale];
     if (!file) continue;
-    const sourcePdfUri = await storeStandardPdf(file);
+    const buf = await bufferFromUpload(file);
+    if (item.locale !== locale && authHash && sha256(buf) === authHash) {
+      throw new Error(duplicateLanguagePdfError(item.label, locale));
+    }
+    const sourcePdfUri = await storeStandardPdf(file, buf);
     await prisma.standardLanguageFile.upsert({
       where: { standardVersionId_locale: { standardVersionId: versionId, locale: item.locale } },
       create: { standardVersionId: versionId, locale: item.locale, sourcePdfUri },
       update: { sourcePdfUri },
     });
+    stored.push({ locale: item.locale, sourcePdfUri });
     if (item.locale === locale) {
       await prisma.standardVersion.update({
         where: { id: versionId },
         data: { sourcePdfUri },
       });
+    }
+  }
+  // Pre-build Clause 1 public rasters for each uploaded language (EN/FR/PT/AR).
+  if (stored.length) {
+    try {
+      const { ensureStandardPreviewRasters } = await import("@/lib/preview-raster");
+      for (const item of stored) {
+        await ensureStandardPreviewRasters({
+          standardVersionId: versionId,
+          sourcePdfUri: item.sourcePdfUri,
+          rasterKey: `${versionId}-${item.locale}`,
+        });
+      }
+    } catch (err) {
+      console.error("language preview raster prewarm failed", versionId, err);
     }
   }
 }

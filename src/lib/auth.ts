@@ -10,6 +10,8 @@ export const IDLE_MS = 10 * 60 * 1000;
 /** Cookie may outlive idle; idle is enforced via Session.expiresAt in the DB. */
 export const SESSION_COOKIE_MAX_AGE_S = 60 * 60 * 24 * 7;
 export const SESSION_COOKIE = "acap_session";
+/** Keep session cookie under /arso so Marks at site root is untouched. */
+export const SESSION_COOKIE_PATH = "/arso";
 
 export async function hashPassword(password: string) {
   return bcrypt.hash(password, 10);
@@ -37,7 +39,7 @@ export async function createSession(userId: string, opts?: { impersonatorId?: st
   jar.set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
-    path: "/",
+    path: SESSION_COOKIE_PATH,
     maxAge: SESSION_COOKIE_MAX_AGE_S,
   });
   return session;
@@ -48,7 +50,7 @@ export async function destroySession() {
   const token = jar.get(SESSION_COOKIE)?.value;
   if (token) {
     await prisma.session.deleteMany({ where: { token } });
-    jar.delete(SESSION_COOKIE);
+    jar.delete({ name: SESSION_COOKIE, path: SESSION_COOKIE_PATH });
   }
 }
 

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { DeskTabs } from "../cb/desk-tabs";
 import type { AnalyticsPayload } from "@/lib/analytics";
 import { t, type Locale } from "@/lib/i18n";
+import { apiFetch } from "@/lib/base-path";
 
 const POLL_MS = 5000;
 
@@ -38,7 +39,7 @@ export function AnalyticsPanel({
     let stop = false;
     async function load() {
       try {
-        const res = await fetch("/api/analytics", { cache: "no-store" });
+        const res = await apiFetch("/api/analytics", { cache: "no-store" });
         const json = (await res.json()) as AnalyticsPayload & { ok?: boolean };
         if (!stop && json.public) {
           setData(json);

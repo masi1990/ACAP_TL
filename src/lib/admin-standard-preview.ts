@@ -8,7 +8,6 @@ import {
   pagesFromManifest,
   tocFromMachineClauses,
 } from "@/lib/preview-raster";
-import { ars464TableOfContents } from "@/lib/standard-preview";
 import type { PdfPreviewPage, PreviewPage, PreviewTocEntry } from "@/lib/standard-preview-types";
 
 /** Deduplicate TOC rows that share the same number+title (avoids React key collisions). */
@@ -24,31 +23,6 @@ function uniqueToc(entries: PreviewTocEntry[]): PreviewTocEntry[] {
   return out;
 }
 
-/** Full ARS 464 page set (all clauses) for authenticated admin preview */
-function buildArs464FullAdminPages(basePath = "/standards/ars-464-2022/pages"): PdfPreviewPage[] {
-  const labels: Record<number, string> = {
-    1: "Cover",
-    2: "Table of contents",
-    3: "Foreword",
-    4: "Copyright notice",
-    5: "Introduction",
-    6: "Blank separator",
-    7: "1 Scope + start of Clause 2",
-    8: "Body (Clause 2+)",
-  };
-  const pages: PdfPreviewPage[] = [];
-  for (let n = 1; n <= 17; n++) {
-    pages.push({
-      n,
-      label: labels[n] || `Page ${n}`,
-      access: "free",
-      imageUrl: `${basePath}/page-${String(n).padStart(2, "0")}.png`,
-      note: "Full standard — authenticated admin preview",
-    });
-  }
-  return pages;
-}
-
 type MachineDoc = {
   standard?: { technicalCommittee?: string; designation?: string; title?: { en?: string } };
   scope?: { text?: { en?: string } };
@@ -61,10 +35,6 @@ type MachineDoc = {
   clauses?: Array<{ number: string; title: string; body?: string }>;
   fullText?: string;
 };
-
-function isArs464(designation: string, editionLabel: string) {
-  return /\bARS\s*464\b/i.test(`${designation} ${editionLabel}`);
-}
 
 function buildFullTextPages(input: {
   editionLabel: string;
@@ -191,13 +161,12 @@ export async function getAdminFullStandardPreview(standardId: string) {
     contentHash: machine.contentHash ?? sv.contentHash,
   });
 
-  const tocFallback = isArs464(designation, sv.editionLabel) ? ars464TableOfContents() : undefined;
   const toc: PreviewTocEntry[] = uniqueToc(
-    tocFromMachineClauses(machine.clauses, tocFallback, machine.fullText),
+    tocFromMachineClauses(machine.clauses, undefined, machine.fullText),
   );
 
   let pdfPages: PdfPreviewPage[] = [];
-  // Prefer clear full-page rasters from the source PDF whenever available
+  // Full-page rasters from this standard's own uploaded PDF
   if (sv.sourcePdfUri) {
     try {
       const rasters = await ensureStandardFullRasters({
@@ -214,10 +183,6 @@ export async function getAdminFullStandardPreview(standardId: string) {
     } catch (e) {
       console.error("admin full preview raster failed", sv.id, e);
     }
-  }
-  // Prepared ARS 464 pack (no uploaded PDF): use clear full-page assets
-  if (pdfPages.length === 0 && isArs464(designation, sv.editionLabel)) {
-    pdfPages = buildArs464FullAdminPages();
   }
 
   const pages = buildFullTextPages({

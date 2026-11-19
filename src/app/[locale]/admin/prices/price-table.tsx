@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { notifyCrud } from "@/components/ui/crud-notice";
 import { DISTRIBUTIONS, distributionLabel, type Distribution } from "@/lib/catalog-access";
+import { apiFetch } from "@/lib/base-path";
 
 export type TariffChip = {
   id: string;
@@ -84,7 +85,7 @@ export function PriceTable({ rows, canWrite }: { rows: PriceRow[]; canWrite: boo
     const row = drafts[versionId];
     if (!row) return;
     setBusyId(versionId);
-    const res = await fetch("/api/admin/prices", {
+    const res = await apiFetch("/api/admin/prices", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

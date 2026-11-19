@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { addStoreCartLine, useStoreCart } from "@/lib/store-cart";
+import { withBasePath } from "@/lib/base-path";
 
 /**
  * Paid standards go into the cart. Checkout is a normal form POST on the cart page.
@@ -40,13 +41,14 @@ export function StoreClient({
   );
 
   if (distribution === "FREE_VIEW" || distribution === "FREE_DOWNLOAD") {
-    const downloadHref = `/api/store/free?item=${encodeURIComponent(catalogItemId)}&lang=${encodeURIComponent(editionLocale)}`;
+    const downloadHref = withBasePath(`/api/store/free?item=${encodeURIComponent(catalogItemId)}&lang=${encodeURIComponent(editionLocale)}`);
     return (
       <div className="space-y-3">
         <div className="flex flex-wrap gap-2">
           <a
-            href={previewHref}
-            className="inline-flex h-12 items-center justify-center rounded-md bg-[var(--ink)] px-4 text-base font-medium text-white"
+            href={languageReady ? withBasePath(previewHref) : undefined}
+            aria-disabled={!languageReady}
+            className={`inline-flex h-12 items-center justify-center rounded-md bg-[var(--ink)] px-4 text-base font-medium text-white ${languageReady ? "" : "pointer-events-none opacity-50"}`}
           >
             Read the standard
           </a>
@@ -61,9 +63,11 @@ export function StoreClient({
           ) : null}
         </div>
         <p className="text-base text-[var(--ink)]">
-          {distribution === "FREE_VIEW"
-            ? `${designation} is free to read on screen. It cannot be downloaded.`
-            : `Choose a language, then download ${designation}.`}
+          {languageReady
+            ? distribution === "FREE_VIEW"
+              ? `${designation} in ${languageLabel} is free to read on screen. It cannot be downloaded.`
+              : `Download ${designation} in ${languageLabel}.`
+            : "Choose an uploaded language, then open the standard."}
         </p>
       </div>
     );
@@ -99,29 +103,32 @@ export function StoreClient({
         </Link>
       </div>
       <div className="flex flex-wrap gap-2">
-        <form method="get" action={`/${locale}/store`} className="inline">
+        <form method="get" action={withBasePath(`/${locale}/store`)} className="inline">
           <input type="hidden" name="preview" value={catalogItemId} />
           <input type="hidden" name="lang" value={previewLocale} />
           <button
             type="submit"
-            className="inline-flex h-12 items-center justify-center rounded-md border border-[var(--line)] bg-[var(--surface-2)] px-4 text-base font-medium text-[var(--ink)]"
+            disabled={!languageReady || !previewLocale}
+            className="inline-flex h-12 items-center justify-center rounded-md border border-[var(--line)] bg-[var(--surface-2)] px-4 text-base font-medium text-[var(--ink)] disabled:opacity-50"
           >
             Preview cover + Scope
           </button>
         </form>
-        <a
-          href={previewHref}
-          className="inline-flex h-12 items-center justify-center rounded-md px-3 text-base text-[var(--accent)] underline sm:hidden"
-        >
-          Open preview
-        </a>
+        {languageReady ? (
+          <a
+            href={withBasePath(previewHref)}
+            className="inline-flex h-12 items-center justify-center rounded-md px-3 text-base text-[var(--accent)] underline sm:hidden"
+          >
+            Open preview
+          </a>
+        ) : null}
       </div>
       <p className="text-xs text-[var(--muted)]">
         {languageReady
           ? inCart
             ? `${designation} in ${languageLabel} is in your cart.`
-            : `Add ${designation} in ${languageLabel}, then pay from the cart.`
-          : "Choose a language, then add this standard to the cart."}
+            : `Preview and cart use the uploaded ${languageLabel} file for ${designation}.`
+          : "Choose an uploaded language, then preview or add this standard to the cart."}
       </p>
     </div>
   );

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { checkoutDescription, parseCheckoutLines, quoteCartLines } from "@/lib/store-checkout";
+import { appAbsoluteUrl } from "@/lib/app-base-url";
 import {
   getAccessToken,
   getPesapalConfig,
@@ -39,7 +40,7 @@ async function readBody(req: NextRequest) {
 
 function browserError(locale: string, next: string, message: string) {
   const path = next === "cart" ? `/${locale}/store/cart` : `/${locale}/store`;
-  const dest = new URL(path, getPesapalConfig().appBaseUrl);
+  const dest = new URL(appAbsoluteUrl(path));
   dest.searchParams.set("payError", message.slice(0, 180));
   return NextResponse.redirect(dest, 303);
 }

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { apiFetch } from "@/lib/base-path";
 
 export function TradeInvite({ organizationId }: { organizationId: string }) {
   const router = useRouter();
@@ -18,7 +19,7 @@ export function TradeInvite({ organizationId }: { organizationId: string }) {
     setBusy(true);
     setError(null);
     setMessage(null);
-    const assign = await fetch("/api/org/assign-existing", {
+    const assign = await apiFetch("/api/org/assign-existing", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, role: "ORG_VIEWER", organizationId }),
@@ -36,7 +37,7 @@ export function TradeInvite({ organizationId }: { organizationId: string }) {
       setError(assigned.error || "Could not add that account");
       return;
     }
-    const invite = await fetch("/api/org/invite", {
+    const invite = await apiFetch("/api/org/invite", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, role: "ORG_VIEWER", organizationId }),

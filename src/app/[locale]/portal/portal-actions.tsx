@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { notifyCrud } from "@/components/ui/crud-notice";
+import { withBasePath } from "@/lib/base-path";
 
 export function PortalActions({
   locale,
@@ -22,7 +23,7 @@ export function PortalActions({
   async function post(url: string, body?: unknown, kind: "created" | "updated" = "created") {
     setBusy(true);
     setMsg(null);
-    const res = await fetch(url, {
+    const res = await fetch(withBasePath(url), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: body ? JSON.stringify(body) : undefined,

@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { notifyCrud } from "@/components/ui/crud-notice";
 import { SearchSelect } from "@/components/ui/search-select";
 import { isLocale, t, type Locale } from "@/lib/i18n";
+import { withBasePath } from "@/lib/base-path";
 
 export type Field = {
   name: string;
@@ -118,7 +119,7 @@ export function CrudForm({
         }
         form.append(f.name, values[f.name] ?? "");
       }
-      res = await fetch(action, { method, body: form });
+      res = await fetch(withBasePath(action), { method, body: form });
     } else {
       const body: Record<string, unknown> = {};
       for (const f of fields) {
@@ -131,7 +132,7 @@ export function CrudForm({
         else if (f.type === "number") body[f.name] = raw === "" ? undefined : Number(raw);
         else body[f.name] = raw;
       }
-      res = await fetch(action, {
+      res = await fetch(withBasePath(action), {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -321,7 +322,7 @@ export function DeleteButton({
     if (!confirm("Delete this record? This cannot be undone.")) return;
     setBusy(true);
     setError(null);
-    const res = await fetch(action, { method: "DELETE" });
+    const res = await fetch(withBasePath(action), { method: "DELETE" });
     const data = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) {

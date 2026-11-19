@@ -9,7 +9,6 @@ import {
   pagesFromManifest,
   tocFromMachineClauses,
 } from "@/lib/preview-raster";
-import { ars464TableOfContents } from "@/lib/standard-preview";
 import { authoritativeLocaleOrNull } from "@/lib/publication";
 
 type MachineDoc = {
@@ -25,10 +24,10 @@ type MachineDoc = {
   fullText?: string;
 };
 
-function isArs464(designation: string, editionLabel: string) {
-  return /\bARS\s*464\b/i.test(`${designation} ${editionLabel}`);
-}
-
+/**
+ * Public/catalog preview for any published standard.
+ * Uses that standard's own PDF + machine pack — no designation-specific assets.
+ */
 export async function getCatalogPreviewPayload(catalogItemId: string, editionLocale?: string | null) {
   const item = await prisma.catalogItem.findUnique({
     where: { id: catalogItemId },
@@ -59,7 +58,7 @@ export async function getCatalogPreviewPayload(catalogItemId: string, editionLoc
     machine = {};
   }
 
-  const scopeEn = extractClause1ScopeOnly(sv.scopeEn);
+  let scopeEn = extractClause1ScopeOnly(sv.scopeEn);
   const technicalCommittee = machine.standard?.technicalCommittee ?? null;
 
   const completeness = assessMachinePackCompleteness({
@@ -78,35 +77,41 @@ export async function getCatalogPreviewPayload(catalogItemId: string, editionLoc
     contentHash: machine.contentHash ?? sv.contentHash,
   });
 
-  const toc = tocFromMachineClauses(
-    machine.clauses,
-    isArs464(designation, sv.editionLabel) ? ars464TableOfContents() : undefined,
-    machine.fullText,
-  );
+  let toc = tocFromMachineClauses(machine.clauses, undefined, machine.fullText);
 
   const readable = openReading(item.distribution);
-  // Per-standard document pages — never reuse another standard's rasters
+  // Per-standard rasters from that version's PDF (keyed by version+locale)
   let pdfPages = undefined as ReturnType<typeof pagesFromManifest> | undefined;
-  if (isArs464(designation, sv.editionLabel) && !sourcePdfUri?.includes("/uploads/") && !readable) {
-    // prepared ARS 464 assets only when this IS ARS 464
-    pdfPages = undefined; // buildStandardPreviewPayload will use ARS464 pack
-  } else if (sourcePdfUri) {
+  if (sourcePdfUri) {
     try {
-      const rasters = readable
-        ? await ensureStandardFullRasters({
-            standardVersionId: sv.id,
-            sourcePdfUri,
-            rasterKey: `${sv.id}-${previewLocale}`,
-          })
-        : await ensureStandardPreviewRasters({
-            standardVersionId: sv.id,
-            sourcePdfUri,
-            rasterKey: `${sv.id}-${previewLocale}`,
-          });
-      if (rasters) {
-        pdfPages = pagesFromManifest(rasters.baseUrl, rasters.manifest).map((page) =>
-          readable ? { ...page, access: "free" as const, note: undefined } : page,
-        );
+      if (readable) {
+        const rasters = await ensureStandardFullRasters({
+          standardVersionId: sv.id,
+          sourcePdfUri,
+          rasterKey: `${sv.id}-${previewLocale}`,
+        });
+        if (rasters) {
+          pdfPages = pagesFromManifest(rasters.baseUrl, rasters.manifest).map((page) => ({
+            ...page,
+            access: "free" as const,
+            note: undefined,
+          }));
+        }
+      } else {
+        const rasters = await ensureStandardPreviewRasters({
+          standardVersionId: sv.id,
+          sourcePdfUri,
+          rasterKey: `${sv.id}-${previewLocale}`,
+        });
+        if (rasters) {
+          pdfPages = pagesFromManifest(rasters.baseUrl, rasters.manifest);
+          // Prefer the selected language PDF text for Clause 1 + TOC (FR/PT/AR editions).
+          if (rasters.editionText?.trim()) {
+            const fromEdition = extractClause1ScopeOnly(rasters.editionText);
+            if (fromEdition.trim()) scopeEn = fromEdition;
+            toc = tocFromMachineClauses(undefined, toc, rasters.editionText);
+          }
+        }
       }
     } catch (e) {
       console.error("preview raster failed", sv.id, e);
@@ -123,6 +128,7 @@ export async function getCatalogPreviewPayload(catalogItemId: string, editionLoc
     technicalCommittee,
     sourcePdfUri,
     designation,
+    editionLocale: previewLocale,
     tableOfContents: toc,
     pdfPages,
   });

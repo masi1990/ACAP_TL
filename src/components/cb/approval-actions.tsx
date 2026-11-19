@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { notifyCrud } from "@/components/ui/crud-notice";
+import { apiFetch } from "@/lib/base-path";
 
 export function ApprovalActions({ kind, id }: { kind: "client" | "product"; id: string }) {
   const router = useRouter();
@@ -10,7 +11,7 @@ export function ApprovalActions({ kind, id }: { kind: "client" | "product"; id: 
 
   async function send(decision: "accept" | "reject") {
     setBusy(decision);
-    const res = await fetch("/api/cb/decision", {
+    const res = await apiFetch("/api/cb/decision", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind, id, decision }),

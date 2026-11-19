@@ -14,12 +14,15 @@ export async function POST(req: NextRequest) {
     where: { userId: session.userId, status: "PENDING" },
   });
   if (pending) return NextResponse.json({ error: "You already have a request waiting" }, { status: 409 });
-  const org = await prisma.organization.findUnique({
-    where: { id: organizationId },
-    include: { operatingCountries: true },
-  });
-  if (!org || !isLibraryInstitution(org) || !countryAllowed(org, memberStateId)) {
-    return NextResponse.json({ error: "Choose an institution and a country it covers" }, { status: 400 });
+  const [org, memberState] = await Promise.all([
+    prisma.organization.findUnique({
+      where: { id: organizationId },
+      include: { operatingCountries: true },
+    }),
+    prisma.memberState.findUnique({ where: { id: memberStateId } }),
+  ]);
+  if (!org || !isLibraryInstitution(org) || !memberState || !countryAllowed(org, memberStateId)) {
+    return NextResponse.json({ error: "Choose an institution and a country" }, { status: 400 });
   }
   const row = await prisma.libraryAccessRequest.create({
     data: { userId: session.userId, organizationId: org.id, memberStateId },

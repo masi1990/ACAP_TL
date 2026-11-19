@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { apiFetch } from "@/lib/base-path";
 
 export default function ReleaseAccountPage() {
   const params = useParams<{ locale: string; token: string }>();
@@ -16,7 +17,7 @@ export default function ReleaseAccountPage() {
     setBusy(true);
     setError("");
     const form = new FormData(event.currentTarget);
-    const res = await fetch(`/api/library/release/${params.token}`, {
+    const res = await apiFetch(`/api/library/release/${params.token}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: form.get("name"), password: form.get("password") }),

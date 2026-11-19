@@ -7,6 +7,7 @@ import { appendAuditEvent } from "@/lib/audit";
 import { issuePasswordReset } from "@/lib/password-reset";
 import { notifyAfterCommit } from "@/lib/notifications";
 import { appointStandardsOfficer, createStaffPosting, logLibraryActivity, notifyStandardsOfficer } from "@/lib/library";
+import { isValidEmail } from "@/lib/utils";
 
 export async function POST(req: NextRequest) {
   const auth = await requirePermission("institutions:write");
@@ -16,7 +17,10 @@ export async function POST(req: NextRequest) {
   const name = String(body.name || "").trim();
   const organizationId = String(body.organizationId || "").trim();
   const memberStateId = String(body.memberStateId || "").trim();
-  if (!email || !organizationId || !memberStateId) {
+  if (!isValidEmail(email)) {
+    return NextResponse.json({ error: "Enter a valid email address" }, { status: 400 });
+  }
+  if (!organizationId || !memberStateId) {
     return NextResponse.json({ error: "Email, institution, and country are required" }, { status: 400 });
   }
   let user = await prisma.userAccount.findUnique({ where: { email } });

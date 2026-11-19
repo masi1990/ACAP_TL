@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { notFound } from "next/navigation";
 
 export const dynamic = "force-dynamic";
@@ -35,12 +36,14 @@ export default async function LocaleLayout({
   const session = await getSessionUser();
   return (
     <div dir={dirFor(locale)} lang={locale} className="relative z-10 flex min-h-screen flex-col">
-      <SiteHeader
-        locale={locale}
-        signedIn={Boolean(session)}
-        countryLabel={session ? membershipCountryLabel(session.user.memberships) : ""}
-        groups={siteNav(session?.user ?? null, locale)}
-      />
+      <Suspense fallback={<div className="sticky top-0 z-40 h-14 border-b border-[var(--line)] bg-white" />}>
+        <SiteHeader
+          locale={locale}
+          signedIn={Boolean(session)}
+          countryLabel={session ? membershipCountryLabel(session.user.memberships) : ""}
+          groups={siteNav(session?.user ?? null, locale)}
+        />
+      </Suspense>
       <CrudNotice />
       <main className="flex-1">{children}</main>
       <footer className="border-t border-[var(--line)]/70 py-6 text-base text-[var(--ink)]">

@@ -1,16 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { SESSION_COOKIE, SESSION_COOKIE_MAX_AGE_S, createSession, hashPassword } from "@/lib/auth";
+import {
+  SESSION_COOKIE,
+  SESSION_COOKIE_MAX_AGE_S,
+  SESSION_COOKIE_PATH,
+  createSession,
+  hashPassword,
+} from "@/lib/auth";
 import { appendAuditEvent } from "@/lib/audit";
 import { logLibraryActivity } from "@/lib/library";
+import { isValidEmail } from "@/lib/utils";
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const email = String(body.email || "").toLowerCase().trim();
   const name = String(body.name || "").trim();
   const password = String(body.password || "");
-  if (!email || !email.includes("@")) {
-    return NextResponse.json({ error: "Enter an email address" }, { status: 400 });
+  if (!isValidEmail(email)) {
+    return NextResponse.json({ error: "Enter a valid email address" }, { status: 400 });
   }
   if (!name) return NextResponse.json({ error: "Enter your name" }, { status: 400 });
   if (password.length < 8) {
@@ -40,7 +47,7 @@ export async function POST(req: NextRequest) {
   res.cookies.set(SESSION_COOKIE, session.token, {
     httpOnly: true,
     sameSite: "lax",
-    path: "/",
+    path: SESSION_COOKIE_PATH,
     maxAge: SESSION_COOKIE_MAX_AGE_S,
   });
   return res;

@@ -7,6 +7,7 @@ import { isLocale, t, type Locale } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { apiFetch, withBasePath } from "@/lib/base-path";
 
 function LoginForm() {
   const params = useParams();
@@ -18,8 +19,8 @@ function LoginForm() {
     nextPath && nextPath.startsWith(`/${locale}/`) && !nextPath.startsWith("//")
       ? nextPath
       : `/${locale}/dashboard`;
-  const [email, setEmail] = useState("admin@arso-oran.org");
-  const [password, setPassword] = useState("ChangeMe!ACAP");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -27,7 +28,7 @@ function LoginForm() {
     e?.preventDefault();
     setLoading(true);
     setError(null);
-    const res = await fetch("/api/auth/login", {
+    const res = await apiFetch("/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
@@ -38,15 +39,14 @@ function LoginForm() {
       setError(data.error || "Sign-in failed");
       return;
     }
-    window.location.assign(safeNext);
+    window.location.assign(withBasePath(safeNext));
   }
 
   return (
     <div className="mx-auto max-w-md px-4 py-16">
       <h1 className="font-[family-name:var(--font-display)] text-3xl">{t(locale, "login")}</h1>
       <p className="mt-2 text-sm text-[var(--muted)]">
-        After sign-in you land on your dashboard with assigned roles. Bootstrap:
-        admin@arso-oran.org (ARSO_ADMIN) · password ChangeMe!ACAP.
+        After sign-in you land on your dashboard with assigned roles.
       </p>
       <form onSubmit={doLogin} className="panel mt-6 space-y-4 p-5">
         <div className="grid gap-2">

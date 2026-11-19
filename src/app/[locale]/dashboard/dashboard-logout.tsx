@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { apiFetch } from "@/lib/base-path";
 
 export function DashboardLogout({ locale }: { locale: string }) {
   const router = useRouter();
@@ -10,7 +11,7 @@ export function DashboardLogout({ locale }: { locale: string }) {
 
   async function logout() {
     setBusy(true);
-    await fetch("/api/auth/logout", { method: "POST" });
+    await apiFetch("/api/auth/logout", { method: "POST" });
     setBusy(false);
     router.push(`/${locale}/login`);
     router.refresh();

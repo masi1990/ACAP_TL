@@ -1,10 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { isLocale, t, type Locale } from "@/lib/i18n";
 import { ScopeReveal } from "@/components/scope-reveal";
 import { StoreClient } from "./store-client";
+
+function pickUploadedLocale(
+  languages: { locale: string; published: boolean }[],
+  preferred?: string | null,
+) {
+  const published = languages.filter((language) => language.published);
+  if (preferred && published.some((language) => language.locale === preferred)) return preferred;
+  if (published.length === 1) return published[0]!.locale;
+  return "";
+}
 
 export function StoreCatalogItem({
   locale,
@@ -24,6 +34,7 @@ export function StoreCatalogItem({
   adoptionTotal,
   adoptionPercent,
   adoptingCountries,
+  initialLang,
 }: {
   locale: string;
   catalogItemId: string;
@@ -42,30 +53,54 @@ export function StoreCatalogItem({
   adoptionTotal: number;
   adoptionPercent: number;
   adoptingCountries: string[];
+  /** Uploaded language from ?lang= when this item's preview is open */
+  initialLang?: string | null;
 }) {
   const ui: Locale = isLocale(locale) ? locale : "en";
-  const [editionLocale, setEditionLocale] = useState("");
+  const defaultLocale = useMemo(
+    () => pickUploadedLocale(languages, initialLang || locale),
+    [languages, initialLang, locale],
+  );
+  const [editionLocale, setEditionLocale] = useState(defaultLocale);
+
+  useEffect(() => {
+    const next = pickUploadedLocale(languages, initialLang || undefined);
+    if (next) setEditionLocale(next);
+  }, [initialLang, languages]);
+
   const languageReady = languages.some((language) => language.published && language.locale === editionLocale);
-  const previewLang = editionLocale || languages.find((language) => language.published)?.locale || "en";
+  const previewLang = languageReady ? editionLocale : "";
   const languageLabel = languages.find((language) => language.locale === editionLocale)?.label || "";
-  const previewHref = `/${locale}/store?preview=${encodeURIComponent(catalogItemId)}&lang=${encodeURIComponent(previewLang)}`;
+  const previewHref = previewLang
+    ? `/${locale}/store?preview=${encodeURIComponent(catalogItemId)}&lang=${encodeURIComponent(previewLang)}`
+    : `/${locale}/store`;
 
   return (
     <article className="panel overflow-hidden">
-      <Link
-        href={previewHref}
-        className="hero-plane block min-h-40 w-full px-5 py-6 transition-opacity hover:opacity-95"
-      >
-        <p className="text-sm uppercase tracking-[0.16em] text-white">
-          {distribution === "FREE_VIEW"
-            ? "African Standard · free to read, no download"
-            : distribution === "FREE_DOWNLOAD"
-              ? "African Standard · free to read and download"
-              : "African Standard · tap to preview"}
-        </p>
-        <h2 className="mt-2 font-[family-name:var(--font-display)] text-2xl text-white">{editionLabel}</h2>
-        <p className="mt-1 text-sm text-white/80">{coverTitle}</p>
-      </Link>
+      {languageReady ? (
+        <Link
+          href={previewHref}
+          className="hero-plane block min-h-40 w-full px-5 py-6 transition-opacity hover:opacity-95"
+        >
+          <p className="text-sm uppercase tracking-[0.16em] text-white">
+            {distribution === "FREE_VIEW"
+              ? "African Standard · free to read, no download"
+              : distribution === "FREE_DOWNLOAD"
+                ? "African Standard · free to read and download"
+                : "African Standard · tap to preview"}
+          </p>
+          <h2 className="mt-2 font-[family-name:var(--font-display)] text-2xl text-white">{editionLabel}</h2>
+          <p className="mt-1 text-sm text-white/80">{coverTitle}</p>
+        </Link>
+      ) : (
+        <div className="hero-plane block min-h-40 w-full px-5 py-6">
+          <p className="text-sm uppercase tracking-[0.16em] text-white">
+            African Standard · choose an uploaded language to preview
+          </p>
+          <h2 className="mt-2 font-[family-name:var(--font-display)] text-2xl text-white">{editionLabel}</h2>
+          <p className="mt-1 text-sm text-white/80">{coverTitle}</p>
+        </div>
+      )}
       <div className="space-y-3 p-5">
         <p className="text-sm text-[var(--muted)]">
           <span className="font-semibold text-[var(--ink)]">{t(ui, "Category")}: </span>

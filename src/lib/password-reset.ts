@@ -1,4 +1,5 @@
 import { randomBytes } from "crypto";
+import { appAbsoluteUrl } from "@/lib/app-base-url";
 import { prisma } from "@/lib/db";
 import { hashPassword, sha256 } from "@/lib/auth";
 import { notifyAfterCommit, queuePasswordReset } from "@/lib/notifications";
@@ -15,8 +16,7 @@ export async function issuePasswordReset(user: { id: string; email: string; name
     },
   });
   await queuePasswordReset({ resetId: row.id, email: user.email, name: user.name, token: raw });
-  const base = (process.env.APP_BASE_URL?.trim() || "http://127.0.0.1:43123").replace(/\/$/, "");
-  return { url: `${base}/en/reset-password?token=${raw}` };
+  return { url: appAbsoluteUrl(`/en/reset-password?token=${encodeURIComponent(raw)}`) };
 }
 
 export async function consumePasswordReset(token: string, password: string) {

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { FullPreviewViewer } from "@/components/admin/full-preview-viewer";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { AdminFullStandardPreview } from "@/lib/admin-standard-preview";
+import { apiFetch } from "@/lib/base-path";
 
 export function StandardViewButton({ standardId, label }: { standardId: string; label: string }) {
   const [open, setOpen] = useState(false);
@@ -18,7 +19,7 @@ export function StandardViewButton({ standardId, label }: { standardId: string; 
     setError(null);
     setBusy(true);
     try {
-      const res = await fetch(`/api/cb/standards/${standardId}`);
+      const res = await apiFetch(`/api/cb/standards/${standardId}`);
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || "The standard could not be opened");
       setPreview(body as AdminFullStandardPreview);

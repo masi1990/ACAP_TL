@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { formatCents } from "@/lib/utils";
 import { removeStoreCartLine, useStoreCart, type StoreCartLine } from "@/lib/store-cart";
+import { apiFetch, withBasePath } from "@/lib/base-path";
 
 type QuoteLine = {
   catalogItemId: string;
@@ -53,7 +54,7 @@ export function CartClient({
     const controller = new AbortController();
     let cancelled = false;
     setChecking(true);
-    fetch(`/api/store/cart?items=${encodeURIComponent(cartKey)}`, { signal: controller.signal })
+    apiFetch(`/api/store/cart?items=${encodeURIComponent(cartKey)}`, { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error("quote failed");
         return (await response.json()) as Quote;
@@ -127,7 +128,7 @@ export function CartClient({
             <p className="mt-2 text-sm text-rose-700">{quote.problems.find((problem) => !problem.catalogItemId)?.message}</p>
           ) : null}
 
-          <form method="post" action="/api/store/checkout" className="mt-8 space-y-3">
+          <form method="post" action={withBasePath("/api/store/checkout")} className="mt-8 space-y-3">
             <input type="hidden" name="provider" value="PESAPAL" />
             <input type="hidden" name="locale" value={locale} />
             <input type="hidden" name="next" value="cart" />

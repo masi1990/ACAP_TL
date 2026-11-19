@@ -5,6 +5,13 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/** Practical email check for account creation (local-part@domain.tld). */
+export function isValidEmail(value: string) {
+  const email = String(value || "").trim();
+  if (!email || email.length > 254) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(email);
+}
+
 export function normalizeTariffCode(input: string): string {
   return input.replace(/\D/g, "");
 }

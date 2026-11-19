@@ -7,6 +7,7 @@ import { isLocale, type Locale } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { apiFetch } from "@/lib/base-path";
 
 export default function ForgotPasswordPage() {
   const params = useParams();
@@ -19,7 +20,7 @@ export default function ForgotPasswordPage() {
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
     setLoading(true);
-    const res = await fetch("/api/auth/forgot-password", {
+    const res = await apiFetch("/api/auth/forgot-password", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email }),

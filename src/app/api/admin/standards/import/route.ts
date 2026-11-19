@@ -8,6 +8,7 @@ import { appendAuditEvent } from "@/lib/audit";
 import { convertUploadedStandard } from "@/lib/standard-import";
 import { authoritativeLocaleOrNull } from "@/lib/publication";
 import {
+  duplicateLanguagePdfError,
   ensureAuthoritativeLanguageFile,
   LANGUAGE_FILE_FIELDS,
   parseIdList,
@@ -141,11 +142,16 @@ export async function POST(req: NextRequest) {
     );
   }
   const storedLanguages: Partial<Record<LanguageCode, string>> = {};
+  const authoritativeHash = createHash("sha256").update(buffer).digest("hex");
   try {
     for (const item of LANGUAGE_FILE_FIELDS) {
       const extra = languageUploads[item.locale];
       if (!extra) continue;
-      storedLanguages[item.locale] = await storeStandardPdf(extra);
+      const extraBuf = Buffer.from(await extra.arrayBuffer());
+      if (createHash("sha256").update(extraBuf).digest("hex") === authoritativeHash) {
+        throw new Error(duplicateLanguagePdfError(item.label, authoritativeLocale));
+      }
+      storedLanguages[item.locale] = await storeStandardPdf(extra, extraBuf);
     }
   } catch (err) {
     return NextResponse.json(
@@ -221,6 +227,26 @@ export async function POST(req: NextRequest) {
       create: { standardVersionId: verId, locale, sourcePdfUri: uri },
       update: { sourcePdfUri: uri },
     });
+  }
+  // Pre-build exact page rasters so admin/store preview does not generate on first open.
+  try {
+    const { ensureStandardFullRasters, ensureStandardPreviewRasters } = await import("@/lib/preview-raster");
+    await ensureStandardFullRasters({ standardVersionId: verId, sourcePdfUri: sourceUri });
+    await ensureStandardPreviewRasters({
+      standardVersionId: verId,
+      sourcePdfUri: sourceUri,
+      rasterKey: `${verId}-${authoritativeLocale}`,
+    });
+    for (const [locale, uri] of Object.entries(storedLanguages)) {
+      if (!uri) continue;
+      await ensureStandardPreviewRasters({
+        standardVersionId: verId,
+        sourcePdfUri: uri,
+        rasterKey: `${verId}-${locale}`,
+      });
+    }
+  } catch (err) {
+    console.error("preview raster prewarm failed", verId, err);
   }
   await replaceStandardAdoptions(standard.id, memberStateIds);
 

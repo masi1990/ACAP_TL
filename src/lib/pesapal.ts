@@ -3,6 +3,8 @@
  * `lib/pesapalV30Helper.php` (WordPress plugin cannot run in Next.js).
  */
 
+import { appBaseUrl as publicAppBaseUrl } from "@/lib/app-base-url";
+
 export type PesapalEnv = "demo" | "live";
 
 export type PesapalBillingAddress = {
@@ -84,7 +86,7 @@ export function getPesapalConfig() {
   const consumerSecret = process.env.PESAPAL_CONSUMER_SECRET?.trim() || "";
   const env = (process.env.PESAPAL_ENV === "live" ? "live" : "demo") as PesapalEnv;
   const ipnId = process.env.PESAPAL_IPN_ID?.trim() || "";
-  const appBaseUrl = (process.env.APP_BASE_URL || "http://127.0.0.1:43123").replace(/\/$/, "");
+  const appBaseUrl = publicAppBaseUrl();
   return {
     consumerKey,
     consumerSecret,

@@ -4,6 +4,7 @@ import { CertificateToolbar } from "@/components/certificate-actions";
 import { prisma } from "@/lib/db";
 import { annexTitle, INTERNAL_CERTIFICATE_KIND } from "@/lib/dossier";
 import { isLocale, type Locale } from "@/lib/i18n";
+import { withBasePath } from "@/lib/base-path";
 
 function formatDay(value: Date) {
   return value.toLocaleDateString("en-GB", {
@@ -69,7 +70,11 @@ export default async function CertificatePage({
       ) : (
         <CertificateToolbar
           fallbackHref={`/${locale}/registry`}
-          fileHref={scanned ? `/api/certificates/${encodeURIComponent(coc.certificateNo)}/file` : null}
+          fileHref={
+            scanned
+              ? withBasePath(`/api/certificates/${encodeURIComponent(coc.certificateNo)}/file`)
+              : null
+          }
         />
       )}
       <article className="bg-[#f7f1e4] px-8 py-10 text-[#1c1915] shadow-sm print:shadow-none sm:px-12">

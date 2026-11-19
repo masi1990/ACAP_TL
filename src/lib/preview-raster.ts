@@ -31,10 +31,12 @@ type Manifest = {
   mode?: "public" | "full";
   /** Public packs built with multilingual Clause 1 detection. */
   cutoff?: string;
+  /** Localized Clause 1 label (EN/FR/PT/AR). */
+  scopeLabel?: string;
   pages: ManifestPage[];
 };
 
-const PUBLIC_CUTOFF = "clause-1-i18n";
+const PUBLIC_CUTOFF = "start-through-clause1";
 
 /** Resolve a public URI (/uploads/… or /standards/…) to a filesystem path. */
 export function publicUriToFs(uri: string): string | null {
@@ -48,7 +50,7 @@ export async function ensureStandardPreviewRasters(opts: {
   standardVersionId: string;
   sourcePdfUri: string | null | undefined;
   rasterKey?: string;
-}): Promise<{ baseUrl: string; manifest: Manifest } | null> {
+}): Promise<{ baseUrl: string; manifest: Manifest; editionText?: string } | null> {
   if (!opts.sourcePdfUri) return null;
   const pdfFs = publicUriToFs(opts.sourcePdfUri);
   if (!pdfFs || !(await exists(pdfFs))) return null;
@@ -58,7 +60,8 @@ export async function ensureStandardPreviewRasters(opts: {
   const outDir = path.join(process.cwd(), "public", outRel);
   const manifestPath = path.join(outDir, "manifest.json");
 
-  let needsRebuild = !(await exists(manifestPath));
+  const textPath = path.join(outDir, "preview-text.txt");
+  let needsRebuild = !(await exists(manifestPath)) || !(await exists(textPath));
   if (!needsRebuild) {
     try {
       const existing = JSON.parse(await readFile(manifestPath, "utf8")) as Manifest;
@@ -69,17 +72,30 @@ export async function ensureStandardPreviewRasters(opts: {
   }
 
   if (needsRebuild) {
-    await mkdir(outDir, { recursive: true });
-    const script = path.join(process.cwd(), "scripts", "generate-standard-preview.py");
-    await execFileAsync(await resolvePython(), [script, pdfFs, outDir], {
-      maxBuffer: 32 * 1024 * 1024,
-      timeout: 120_000,
-    });
+    try {
+      await mkdir(outDir, { recursive: true });
+      const script = path.join(process.cwd(), "scripts", "generate-standard-preview.py");
+      await execFileAsync(await resolvePython(), [script, pdfFs, outDir], {
+        maxBuffer: 32 * 1024 * 1024,
+        timeout: 90_000,
+      });
+    } catch (err) {
+      console.error("public preview raster build failed", opts.standardVersionId, err);
+      if (!(await exists(manifestPath))) return null;
+    }
   }
 
   if (!(await exists(manifestPath))) return null;
   const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Manifest;
-  return { baseUrl: `/${outRel.replace(/\\/g, "/")}`, manifest };
+  let editionText: string | undefined;
+  if (await exists(textPath)) {
+    try {
+      editionText = await readFile(textPath, "utf8");
+    } catch {
+      editionText = undefined;
+    }
+  }
+  return { baseUrl: `/${outRel.replace(/\\/g, "/")}`, manifest, editionText };
 }
 
 /**
@@ -111,12 +127,18 @@ export async function ensureStandardFullRasters(opts: {
   }
 
   if (needsRebuild) {
-    await mkdir(outDir, { recursive: true });
-    const script = path.join(process.cwd(), "scripts", "generate-standard-preview.py");
-    await execFileAsync(await resolvePython(), [script, pdfFs, outDir, "--full"], {
-      maxBuffer: 32 * 1024 * 1024,
-      timeout: 120_000,
-    });
+    try {
+      await mkdir(outDir, { recursive: true });
+      const script = path.join(process.cwd(), "scripts", "generate-standard-preview.py");
+      await execFileAsync(await resolvePython(), [script, pdfFs, outDir, "--full"], {
+        maxBuffer: 32 * 1024 * 1024,
+        timeout: 90_000,
+      });
+    } catch (err) {
+      // Never take down the Node process request path — fall back to machine-pack pages.
+      console.error("full preview raster build failed", opts.standardVersionId, err);
+      if (!(await exists(manifestPath))) return null;
+    }
   }
 
   if (!(await exists(manifestPath))) return null;
@@ -124,14 +146,23 @@ export async function ensureStandardFullRasters(opts: {
   return { baseUrl: `/${outRel.replace(/\\/g, "/")}`, manifest };
 }
 
+/** Serve via /api/uploads so rasters created after `next start` are visible without restart. */
+function publicUploadToApiUrl(uri: string) {
+  if (uri.startsWith("/uploads/")) return `/api/uploads/${uri.slice("/uploads/".length)}`;
+  if (uri.startsWith("uploads/")) return `/api/uploads/${uri.slice("uploads/".length)}`;
+  return uri;
+}
+
 export function pagesFromManifest(baseUrl: string, manifest: Manifest): PdfPreviewPage[] {
-  return manifest.pages.map((p, idx) => ({
-    n: idx + 1,
-    label: p.label,
-    access: p.access === "partial" ? "free" : p.access, // scope-only is free, never partial with clause 2
-    imageUrl: `${baseUrl}/${p.image}`,
-    note: p.note,
-  }));
+  return manifest.pages
+    .filter((p) => Boolean(p.image))
+    .map((p, idx) => ({
+      n: idx + 1,
+      label: p.label,
+      access: p.access === "partial" ? "free" : p.access,
+      imageUrl: publicUploadToApiUrl(`${baseUrl}/${p.image}`),
+      note: p.note,
+    }));
 }
 
 /** Build TOC from full text headings — only clause 1 is free. */
@@ -152,6 +183,9 @@ export function tocFromFullText(fullText: string | undefined, fallback?: Preview
     if (!/^\p{L}/u.test(title)) continue;
     if (/^\d+(\s*[–-]\s*\d+)?$/.test(title)) continue;
     if (/^20\d{2}$/.test(number)) continue;
+    if (Number(number) > 20 || Number(number) < 1) continue;
+    if (/\bcfu\b/i.test(title) || /^absence\b/i.test(title) || /^\d/.test(title)) continue;
+    if (/first edition/i.test(title)) continue;
     seen.add(number);
     entries.push({
       number,
@@ -186,7 +220,10 @@ export function tocFromFullText(fullText: string | undefined, fallback?: Preview
     !/^\p{L}/u.test(title) ||
     title.length < 4 ||
     /^[\d\s–—.\-]+$/.test(title) ||
-    /\d+\s*[–—-]\s*\d+/.test(title);
+    /\d+\s*[–—-]\s*\d+/.test(title) ||
+    /\bcfu\b/i.test(title) ||
+    /^absence\b/i.test(title) ||
+    /^\d/.test(title);
 
   const clean = entries.filter((e) => !isJunkTitle(e.title));
   if (clean.length < 2) {
@@ -219,7 +256,19 @@ export function tocFromMachineClauses(
       pageHint: "—",
       includedInPreview: String(c.number) === "1",
     }))
-    .filter((e) => /^\p{L}/u.test(e.title) && e.title.length >= 4 && !/\d+\s*[–—-]\s*\d+/.test(e.title));
+    .filter(
+      (e) =>
+        /^\p{L}/u.test(e.title) &&
+        e.title.length >= 4 &&
+        e.title.length <= 80 &&
+        !/\d+\s*[–—-]\s*\d+/.test(e.title) &&
+        !/\bcfu\b/i.test(e.title) &&
+        !/^absence\b/i.test(e.title) &&
+        !/^\d/.test(e.title) &&
+        !/^first edition\b/i.test(e.title) &&
+        Number(e.number) >= 1 &&
+        Number(e.number) <= 20,
+    );
   if (list.length < 2) return fromText;
   // Prefer fullText TOC when clause titles look like prose fragments
   const junk = list.filter((e) => e.title.length > 60 || / of this | may contain /i.test(e.title)).length;
