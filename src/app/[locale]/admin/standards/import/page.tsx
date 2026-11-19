@@ -11,6 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { notifyCrud } from "@/components/ui/crud-notice";
 import { AUTHORITATIVE_LOCALES } from "@/lib/publication";
 import { LANGUAGE_FILE_FIELDS, STANDARD_KINDS } from "@/lib/standard-kinds";
+import { apiFetch } from "@/lib/base-path";
+import { DeskTabs } from "@/app/[locale]/cb/desk-tabs";
 
 type Check = { id: string; label: string; required: boolean; present: boolean; notes?: string };
 type TariffOpt = { id: string; label: string };
@@ -40,7 +42,7 @@ export default function StandardImportPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void fetch("/api/admin/sectors")
+    void apiFetch("/api/admin/sectors")
       .then((r) => r.json())
       .then((data) => {
         const sectors = (data.rows || []) as Array<{
@@ -59,7 +61,7 @@ export default function StandardImportPage() {
         setCountries(states.map((state) => ({ id: state.id, label: `${state.name} (${state.iso2})` })));
       })
       .catch(() => undefined);
-    void fetch("/api/admin/tariffs")
+    void apiFetch("/api/admin/tariffs")
       .then((r) => r.json())
       .then((data) => {
         const rows = (data.rows || data.tariffs || []) as Array<{
@@ -113,7 +115,7 @@ export default function StandardImportPage() {
       if (extra && item.locale !== authoritativeLocale) form.set(item.field, extra);
     }
 
-    const res = await fetch("/api/admin/standards/import", { method: "POST", body: form });
+    const res = await apiFetch("/api/admin/standards/import", { method: "POST", body: form });
     const data = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) {
@@ -154,73 +156,155 @@ export default function StandardImportPage() {
     }
   }
 
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-xl font-semibold">Import standard (PDF / Word)</h2>
-        <p className="mt-2 text-sm text-[var(--muted)]">
-          Standards can affect <strong className="font-medium text-[var(--ink)]">people, animals, and the
-          environment</strong>. Conversion extracts the full text into a machine pack and runs
-          completeness checks. Normative content must not be omitted — incomplete packs stay in{" "}
-          <span className="font-mono">DRAFT_IMPORT</span> for human review before relying on them for
-          certification.
-        </p>
-      </div>
-
-      <form
-        className="panel grid gap-4 p-5"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void run(false);
-        }}
-      >
-        <div className="grid gap-2">
-          <Label htmlFor="file">Source document</Label>
-          <Input
-            key={fileKey}
-            id="file"
-            type="file"
-            accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
-            required
-          />
-          <p className="text-xs text-[var(--muted)]">PDF (PyMuPDF text extract) or Word .docx (mammoth).</p>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
+  const tabs = [
+    {
+      id: "upload",
+      label: "Upload",
+      content: (
+        <div className="grid gap-4">
           <div className="grid gap-2">
-            <Label htmlFor="designation">Designation override (optional)</Label>
+            <Label htmlFor="file">Source document</Label>
             <Input
-              id="designation"
-              value={designation}
-              onChange={(e) => setDesignation(e.target.value)}
-              placeholder="ARS 464:2022"
+              key={fileKey}
+              id="file"
+              type="file"
+              accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
             />
+            <p className="text-xs text-[var(--muted)]">PDF (PyMuPDF text extract) or Word .docx (mammoth).</p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="designation">Designation override (optional)</Label>
+              <Input
+                id="designation"
+                value={designation}
+                onChange={(e) => setDesignation(e.target.value)}
+                placeholder="ARS 464:2022"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="ics">ICS</Label>
+              <Input id="ics" value={ics} onChange={(e) => setIcs(e.target.value)} />
+            </div>
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="ics">ICS</Label>
-            <Input id="ics" value={ics} onChange={(e) => setIcs(e.target.value)} />
+            <Label htmlFor="title">Title override (optional)</Label>
+            <Input id="title" value={title} onChange={(e) => setTitle(e.target.value)} />
           </div>
         </div>
-        <div className="grid gap-2">
-          <Label htmlFor="title">Title override (optional)</Label>
-          <Input id="title" value={title} onChange={(e) => setTitle(e.target.value)} />
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
+      ),
+    },
+    {
+      id: "details",
+      label: "Details",
+      content: (
+        <div className="grid gap-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="kind">Category</Label>
+              <select
+                id="kind"
+                value={kind}
+                onChange={(e) => setKind(e.target.value)}
+                className="h-10 w-full rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 text-sm"
+              >
+                {STANDARD_KINDS.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
           <div className="grid gap-2">
-            <Label htmlFor="kind">Category</Label>
+            <Label htmlFor="committee">Technical committee</Label>
             <select
-              id="kind"
-              value={kind}
-              onChange={(e) => setKind(e.target.value)}
+              id="committee"
+              value={technicalCommitteeId}
+              onChange={(e) => setTechnicalCommitteeId(e.target.value)}
               className="h-10 w-full rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 text-sm"
             >
-              {STANDARD_KINDS.map((item) => (
-                <option key={item.value} value={item.value}>
-                  {item.label}
+              <option value="">{committees.length === 0 ? "Create a sector and committee first" : "Select…"}</option>
+              {committees.map((committee) => (
+                <option key={committee.id} value={committee.id}>
+                  {committee.label}
                 </option>
               ))}
             </select>
           </div>
+          <div className="grid gap-2">
+            <Label>Adopting countries</Label>
+            <div className="max-h-40 space-y-1 overflow-y-auto rounded-md border border-[var(--line)] bg-[var(--surface)] p-2">
+              {countries.length === 0 && (
+                <p className="px-2 py-2 text-sm text-[var(--muted)]">No member states loaded.</p>
+              )}
+              {countries.map((country) => {
+                const checked = selectedCountries.includes(country.id);
+                return (
+                  <label
+                    key={country.id}
+                    className="flex cursor-pointer items-start gap-2 rounded px-2 py-1.5 text-sm hover:bg-[var(--surface-2)]"
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={checked}
+                      onChange={() =>
+                        setSelectedCountries((prev) =>
+                          checked ? prev.filter((id) => id !== country.id) : [...prev, country.id],
+                        )
+                      }
+                    />
+                    <span className="leading-snug">{country.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+            <p className="text-xs text-[var(--muted)]">{selectedCountries.length} adopting country(ies) selected</p>
+          </div>
+          <p className="text-sm text-[var(--muted)]">
+            The webstore price is set afterwards on the Price table tab. This upload does not assign a price.
+          </p>
+
+          <div className="grid gap-2">
+            <Label>Tariff lines (multi-select — one standard can address many)</Label>
+            <div className="max-h-40 space-y-1 overflow-y-auto rounded-md border border-[var(--line)] bg-[var(--surface)] p-2">
+              {tariffOptions.length === 0 && (
+                <p className="px-2 py-2 text-sm text-[var(--muted)]">
+                  No tariff lines yet — add RECs and tariff codes first (optional for import).
+                </p>
+              )}
+              {tariffOptions.map((t) => {
+                const checked = selectedTariffs.includes(t.id);
+                return (
+                  <label
+                    key={t.id}
+                    className="flex cursor-pointer items-start gap-2 rounded px-2 py-1.5 text-sm hover:bg-[var(--surface-2)]"
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={checked}
+                      onChange={() =>
+                        setSelectedTariffs((prev) => (checked ? prev.filter((id) => id !== t.id) : [...prev, t.id]))
+                      }
+                    />
+                    <span className="leading-snug">{t.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+            <p className="text-xs text-[var(--muted)]">{selectedTariffs.length} tariff line(s) selected</p>
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: "languages",
+      label: "Languages",
+      content: (
+        <div className="grid gap-4">
           <div className="grid gap-2">
             <Label htmlFor="locale">Authoritative language</Label>
             <select
@@ -236,117 +320,61 @@ export default function StandardImportPage() {
               ))}
             </select>
           </div>
-        </div>
-        <div className="grid gap-2">
-          <Label htmlFor="committee">Technical committee</Label>
-          <select
-            id="committee"
-            value={technicalCommitteeId}
-            onChange={(e) => setTechnicalCommitteeId(e.target.value)}
-            className="h-10 w-full rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 text-sm"
-          >
-            <option value="">{committees.length === 0 ? "Create a sector and committee first" : "Select…"}</option>
-            {committees.map((committee) => (
-              <option key={committee.id} value={committee.id}>
-                {committee.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="grid gap-2">
-          <Label>Other language PDFs</Label>
-          <div className="grid gap-3 sm:grid-cols-3">
-            {LANGUAGE_FILE_FIELDS.filter((item) => item.locale !== authoritativeLocale).map((item) => (
-              <div key={item.field} className="grid gap-1">
-                <Label htmlFor={item.field}>{item.label}</Label>
-                <Input
-                  key={`${item.field}-${fileKey}`}
-                  id={item.field}
-                  type="file"
-                  accept=".pdf,application/pdf"
-                  onChange={(e) => {
-                    const next = e.target.files?.[0];
-                    setLanguageFiles((prev) => {
-                      const copy = { ...prev };
-                      if (next) copy[item.field] = next;
-                      else delete copy[item.field];
-                      return copy;
-                    });
-                  }}
-                />
-              </div>
-            ))}
-          </div>
-          <p className="text-xs text-[var(--muted)]">
-            The source document is the authoritative language. Add PDFs for the other languages buyers can preview and purchase.
-          </p>
-        </div>
-        <div className="grid gap-2">
-          <Label>Adopting countries</Label>
-          <div className="max-h-40 space-y-1 overflow-y-auto rounded-md border border-[var(--line)] bg-[var(--surface)] p-2">
-            {countries.length === 0 && (
-              <p className="px-2 py-2 text-sm text-[var(--muted)]">No member states loaded.</p>
-            )}
-            {countries.map((country) => {
-              const checked = selectedCountries.includes(country.id);
-              return (
-                <label
-                  key={country.id}
-                  className="flex cursor-pointer items-start gap-2 rounded px-2 py-1.5 text-sm hover:bg-[var(--surface-2)]"
-                >
-                  <input
-                    type="checkbox"
-                    className="mt-0.5"
-                    checked={checked}
-                    onChange={() =>
-                      setSelectedCountries((prev) =>
-                        checked ? prev.filter((id) => id !== country.id) : [...prev, country.id],
-                      )
-                    }
+          <div className="grid gap-2">
+            <Label>Other language PDFs</Label>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {LANGUAGE_FILE_FIELDS.filter((item) => item.locale !== authoritativeLocale).map((item) => (
+                <div key={item.field} className="grid gap-1">
+                  <Label htmlFor={item.field}>{item.label}</Label>
+                  <Input
+                    key={`${item.field}-${fileKey}`}
+                    id={item.field}
+                    type="file"
+                    accept=".pdf,application/pdf"
+                    onChange={(e) => {
+                      const next = e.target.files?.[0];
+                      setLanguageFiles((prev) => {
+                        const copy = { ...prev };
+                        if (next) copy[item.field] = next;
+                        else delete copy[item.field];
+                        return copy;
+                      });
+                    }}
                   />
-                  <span className="leading-snug">{country.label}</span>
-                </label>
-              );
-            })}
+                </div>
+              ))}
+            </div>
+            <p className="text-xs text-[var(--muted)]">
+              The source document is the authoritative language. Add PDFs for the other languages buyers can preview and
+              purchase.
+            </p>
           </div>
-          <p className="text-xs text-[var(--muted)]">{selectedCountries.length} adopting country(ies) selected</p>
         </div>
-        <p className="text-sm text-[var(--muted)]">
-          The webstore price is set afterwards on the Price table tab. This upload does not assign a price.
-        </p>
+      ),
+    },
+  ];
 
-        <div className="grid gap-2">
-          <Label>Tariff lines (multi-select — one standard can address many)</Label>
-          <div className="max-h-40 space-y-1 overflow-y-auto rounded-md border border-[var(--line)] bg-[var(--surface)] p-2">
-            {tariffOptions.length === 0 && (
-              <p className="px-2 py-2 text-sm text-[var(--muted)]">
-                No tariff lines yet — add RECs and tariff codes first (optional for import).
-              </p>
-            )}
-            {tariffOptions.map((t) => {
-              const checked = selectedTariffs.includes(t.id);
-              return (
-                <label
-                  key={t.id}
-                  className="flex cursor-pointer items-start gap-2 rounded px-2 py-1.5 text-sm hover:bg-[var(--surface-2)]"
-                >
-                  <input
-                    type="checkbox"
-                    className="mt-0.5"
-                    checked={checked}
-                    onChange={() =>
-                      setSelectedTariffs((prev) =>
-                        checked ? prev.filter((id) => id !== t.id) : [...prev, t.id],
-                      )
-                    }
-                  />
-                  <span className="leading-snug">{t.label}</span>
-                </label>
-              );
-            })}
-          </div>
-          <p className="text-xs text-[var(--muted)]">{selectedTariffs.length} tariff line(s) selected</p>
-        </div>
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-semibold">Import standard (PDF / Word)</h2>
+        <p className="mt-2 text-sm text-[var(--muted)]">
+          Standards can affect{" "}
+          <strong className="font-medium text-[var(--ink)]">people, animals, and the environment</strong>. Conversion
+          extracts the full text into a machine pack and runs completeness checks. Normative content must not be omitted
+          — incomplete packs stay in <span className="font-mono">DRAFT_IMPORT</span> for human review before relying on
+          them for certification.
+        </p>
+      </div>
+
+      <form
+        className="panel grid gap-4 p-5"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void run(false);
+        }}
+      >
+        <DeskTabs tabs={tabs} keepMounted />
 
         {error && <p className="text-sm text-rose-700">{error}</p>}
 
