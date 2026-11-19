@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { notifyCrud } from "@/components/ui/crud-notice";
+import { apiFetch } from "@/lib/base-path";
 
 export type InstitutionRequestRow = {
   id: string;
@@ -20,7 +21,7 @@ export function InstitutionRequests({ rows }: { rows: InstitutionRequestRow[] })
 
   async function send(id: string, decision: "approve" | "reject") {
     setBusy(`${id}:${decision}`);
-    const res = await fetch(`/api/admin/institution-requests/${id}`, {
+    const res = await apiFetch(`/api/admin/institution-requests/${id}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ decision }),

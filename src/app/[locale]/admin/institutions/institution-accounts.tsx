@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { roleLabel } from "@/lib/rbac";
+import { apiFetch } from "@/lib/base-path";
 
 export type AccountRole = {
   code: string;
@@ -46,7 +47,7 @@ export function InstitutionAccounts({
     setBusy(true);
     setError(null);
     setMessage(null);
-    const res = await fetch("/api/org/assign-existing", {
+    const res = await apiFetch("/api/org/assign-existing", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, role, organizationId }),
@@ -67,7 +68,7 @@ export function InstitutionAccounts({
     setBusy(true);
     setError(null);
     setMessage(null);
-    const res = await fetch("/api/org/invite", {
+    const res = await apiFetch("/api/org/invite", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, role, organizationId }),
@@ -87,7 +88,7 @@ export function InstitutionAccounts({
     setBusy(true);
     setError(null);
     setMessage(null);
-    const res = await fetch("/api/admin/roles/assignments", {
+    const res = await apiFetch("/api/admin/roles/assignments", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(

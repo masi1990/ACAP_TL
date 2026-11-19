@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { SearchSelect } from "@/components/ui/search-select";
 import { notifyCrud } from "@/components/ui/crud-notice";
 import { AUTHORITY_LABELS, AUTHORITY_TYPES } from "@/lib/rbac";
+import { apiFetch } from "@/lib/base-path";
 
 export type GrantAccount = {
   email: string;
@@ -45,7 +46,7 @@ export function GrantRightsForm({
     setBusy(true);
     setError(null);
     setMsg(null);
-    const res = await fetch("/api/admin/institution-rights", {
+    const res = await apiFetch("/api/admin/institution-rights", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, name, type, memberStateId }),

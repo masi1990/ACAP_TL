@@ -22,11 +22,14 @@ import { ClientRedirect } from "@/components/admin/client-redirect";
 import { Badge } from "@/components/ui/badge";
 import { LinePager } from "@/components/line-pager";
 import { listHref, listPage } from "@/lib/list-page";
+import { DeskTabs } from "@/app/[locale]/cb/desk-tabs";
+import { InstitutionSearch } from "./institution-search";
 import { GrantRightsForm, type GrantAccount } from "./grant-rights-form";
 import { InstitutionForm } from "./institution-form";
 import { InstitutionRequests } from "./institution-requests";
 import { InstitutionAccounts, type AccountRole } from "./institution-accounts";
 import { CountryRecForm } from "./country-recs";
+import { withBasePath } from "@/lib/base-path";
 
 function regionLabel(region: string) {
   return AFRICA_REGIONS.find((item) => item.id === region)?.label || region || "Region not set";
@@ -37,7 +40,14 @@ export default async function InstitutionsPage({
   searchParams,
 }: {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ region?: string; country?: string; rec?: string; type?: string; page?: string }>;
+  searchParams: Promise<{
+    region?: string;
+    country?: string;
+    rec?: string;
+    type?: string;
+    page?: string;
+    q?: string;
+  }>;
 }) {
   const { locale: raw } = await params;
   const query = await searchParams;
@@ -60,6 +70,7 @@ export default async function InstitutionsPage({
         : "";
   const recId = query.rec || "";
   const type = (query.type || "").toUpperCase();
+  const q = (query.q || "").trim();
   const canWrite = can(session.user, "institutions:write");
   const canDelete = can(session.user, "institutions:delete");
   const hubAssign = canAssignAcrossOrganisations(session.user);
@@ -72,7 +83,9 @@ export default async function InstitutionsPage({
     prisma.rec.findMany({ orderBy: { code: "asc" } }),
     prisma.organization.findMany({
       where: {
-        type: { in: type && (AUTHORITY_TYPES as readonly string[]).includes(type) ? [type] : [...AUTHORITY_TYPES] },
+        type: {
+          in: type && (AUTHORITY_TYPES as readonly string[]).includes(type) ? [type] : [...AUTHORITY_TYPES],
+        },
         ...(hubRead
           ? countryId
             ? { memberStateId: countryId }
@@ -114,7 +127,9 @@ export default async function InstitutionsPage({
             memberships: {
               select: {
                 role: true,
-                organization: { select: { name: true, type: true, memberStateId: true } },
+                organization: {
+                  select: { name: true, type: true, memberStateId: true },
+                },
               },
             },
           },
@@ -126,7 +141,10 @@ export default async function InstitutionsPage({
   const requests = canWrite
     ? await prisma.institutionRequest.findMany({
         where: { status: "PENDING" },
-        include: { user: { select: { email: true } }, memberState: { select: { name: true, iso2: true } } },
+        include: {
+          user: { select: { email: true } },
+          memberState: { select: { name: true, iso2: true } },
+        },
         orderBy: { createdAt: "asc" },
       })
     : [];
@@ -145,7 +163,13 @@ export default async function InstitutionsPage({
     });
   }
 
-  function memberHubRoles(assignments: Array<{ roleCode: string; organizationId: string | null; role: { name: string; scope: string } | null }>) {
+  function memberHubRoles(
+    assignments: Array<{
+      roleCode: string;
+      organizationId: string | null;
+      role: { name: string; scope: string } | null;
+    }>,
+  ) {
     return assignments
       .filter((assignment) => assignment.organizationId == null || assignment.role?.scope === "GLOBAL")
       .map((assignment) => ({
@@ -162,79 +186,54 @@ export default async function InstitutionsPage({
     return true;
   });
   const filtered = Boolean(region || countryId || recId);
-  const listedStates = visibleStates.filter(
-    (state) => filtered || organizations.some((org) => org.memberStateId === state.id),
-  );
+  const needle = q.toLowerCase();
+  const has = (value: string | null | undefined) => (value || "").toLowerCase().includes(needle);
+  const rowsByState = new Map<string, typeof organizations>();
+  for (const state of visibleStates) {
+    const stateRows = organizations.filter((org) => org.memberStateId === state.id);
+    const stateHit =
+      Boolean(needle) &&
+      (has(state.name) ||
+        has(state.iso2) ||
+        has(regionLabel(state.region)) ||
+        state.recMemberships.some((membership) => has(membership.rec.code)));
+    rowsByState.set(
+      state.id,
+      !needle || stateHit
+        ? stateRows
+        : stateRows.filter(
+            (org) =>
+              has(org.name) ||
+              has(org.contactEmail) ||
+              has(org.type) ||
+              has(AUTHORITY_LABELS[org.type as keyof typeof AUTHORITY_LABELS]) ||
+              org.memberships.some((member) => has(member.user.email) || has(member.user.name)),
+          ),
+    );
+  }
+  const listedStates = visibleStates.filter((state) => {
+    const stateRows = rowsByState.get(state.id) || [];
+    if (needle) return stateRows.length > 0 || has(state.name) || has(state.iso2);
+    return filtered || stateRows.length > 0;
+  });
   const listing = listPage(query.page, listedStates.length, 8);
   const pageStates = listedStates.slice(listing.skip, listing.skip + listing.take);
+  const listPath = `/${locale}/admin/institutions`;
+  const listFilters = { region, country: countryId, rec: recId, type, q };
 
-  return (
+  const createPanel = (
+    <div className="space-y-4">
+      <InstitutionForm
+        states={states}
+        action={withBasePath("/api/admin/organizations")}
+        idPrefix="institution-"
+        submitLabel="Add authority"
+      />
+    </div>
+  );
+
+  const grantsPanel = (
     <div className="space-y-8">
-      <div>
-        <h2 className="text-xl font-semibold">Institutions by country</h2>
-        <p className="mt-1 max-w-3xl text-sm text-[var(--muted)]">
-          Each country keeps its own certification body, standards body, regulator, customs authority,
-          and other offices. They do not share one account. A country belongs to one region and can
-          belong to more than one REC.           Only ARSO can create or delete an authority. To create one for a person
-          who already has an account, choose that account. The main account of an
-          authority adds members for that same authority type. Other types in the
-          country are listed for viewing only.
-        </p>
-      </div>
-
-      <form method="get" className="flex flex-wrap items-end gap-3 text-sm">
-        <label className="grid gap-1">
-          Region
-          <select name="region" defaultValue={region} className="h-10 rounded-md border border-[var(--line)] bg-[var(--surface)] px-3">
-            <option value="">All regions</option>
-            {AFRICA_REGIONS.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="grid gap-1">
-          Country
-          <select name="country" defaultValue={countryId} className="h-10 max-w-64 rounded-md border border-[var(--line)] bg-[var(--surface)] px-3">
-            <option value="">All countries</option>
-            {countryChoices.map((state) => (
-              <option key={state.id} value={state.id}>
-                {state.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="grid gap-1">
-          REC
-          <select name="rec" defaultValue={recId} className="h-10 rounded-md border border-[var(--line)] bg-[var(--surface)] px-3">
-            <option value="">All RECs</option>
-            {recs.map((rec) => (
-              <option key={rec.id} value={rec.id}>
-                {rec.code}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="grid gap-1">
-          Authority
-          <select name="type" defaultValue={type} className="h-10 rounded-md border border-[var(--line)] bg-[var(--surface)] px-3">
-            <option value="">All types</option>
-            {AUTHORITY_TYPES.map((value) => (
-              <option key={value} value={value}>
-                {AUTHORITY_LABELS[value]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button type="submit" className="h-10 rounded-md bg-[var(--accent)] px-3 font-medium text-[var(--accent-fg)]">
-          Filter
-        </button>
-        <Link href={`/${locale}/admin/institutions`} className="text-[var(--accent)] underline">
-          Clear
-        </Link>
-      </form>
-
       {canWrite && (
         <InstitutionRequests
           rows={requests.map((row) => ({
@@ -251,15 +250,14 @@ export default async function InstitutionsPage({
         <section className="space-y-3">
           <h2 className="text-xl font-semibold">Grant institutional rights</h2>
           <p className="max-w-3xl text-sm text-[var(--muted)]">
-            Use this when someone already has an account and needs an institution on that same login. Choose their
-            account. Their manufacturer company stays, and they become the organisation admin of the new institution.
-            The institution name and country start from the organisation on that account.
+            Use this when someone already has an account and needs an institution on that same login. Choose their account. Their
+            manufacturer company stays, and they become the organisation admin of the new institution. The institution name and
+            country start from the organisation on that account.
           </p>
           <GrantRightsForm
             accounts={accountRows.map((user): GrantAccount => {
               const trade = user.memberships.filter((membership) => isTradeOrgType(membership.organization.type));
-              const chosen =
-                trade.find((membership) => membership.role === "PRIMARY_ADMIN") || trade[0] || user.memberships[0];
+              const chosen = trade.find((membership) => membership.role === "PRIMARY_ADMIN") || trade[0] || user.memberships[0];
               const organizationName = chosen?.organization.name || "";
               return {
                 email: user.email,
@@ -268,23 +266,99 @@ export default async function InstitutionsPage({
                 memberStateId: chosen?.organization.memberStateId || "",
               };
             })}
-            countries={states.map((state) => ({ value: state.id, label: `${state.name} (${state.iso2})` }))}
+            countries={states.map((state) => ({
+              value: state.id,
+              label: `${state.name} (${state.iso2})`,
+            }))}
           />
         </section>
       )}
+    </div>
+  );
 
-      {canWrite && (
-        <InstitutionForm
-          states={states}
-          action="/api/admin/organizations"
-          idPrefix="institution-"
-          submitLabel="Add authority"
-        />
-      )}
+  const byCountryPanel = (
+    <div className="space-y-6">
+      <form method="get" className="flex flex-wrap items-end gap-3 text-sm">
+        <input type="hidden" name="q" value={q} />
+        <label className="grid gap-1">
+          Region
+          <select
+            name="region"
+            defaultValue={region}
+            className="h-10 rounded-md border border-[var(--line)] bg-[var(--surface)] px-3"
+          >
+            <option value="">All regions</option>
+            {AFRICA_REGIONS.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="grid gap-1">
+          Country
+          <select
+            name="country"
+            defaultValue={countryId}
+            className="h-10 max-w-64 rounded-md border border-[var(--line)] bg-[var(--surface)] px-3"
+          >
+            <option value="">All countries</option>
+            {countryChoices.map((state) => (
+              <option key={state.id} value={state.id}>
+                {state.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="grid gap-1">
+          REC
+          <select
+            name="rec"
+            defaultValue={recId}
+            className="h-10 rounded-md border border-[var(--line)] bg-[var(--surface)] px-3"
+          >
+            <option value="">All RECs</option>
+            {recs.map((rec) => (
+              <option key={rec.id} value={rec.id}>
+                {rec.code}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="grid gap-1">
+          Authority
+          <select
+            name="type"
+            defaultValue={type}
+            className="h-10 rounded-md border border-[var(--line)] bg-[var(--surface)] px-3"
+          >
+            <option value="">All types</option>
+            {AUTHORITY_TYPES.map((value) => (
+              <option key={value} value={value}>
+                {AUTHORITY_LABELS[value]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="submit" className="h-10 rounded-md bg-[var(--accent)] px-3 font-medium text-[var(--accent-fg)]">
+          Filter
+        </button>
+        <Link href={`${listPath}#by-country`} className="text-[var(--accent)] underline">
+          Clear
+        </Link>
+      </form>
 
+      <InstitutionSearch
+        pathname={listPath}
+        query={{ region, country: countryId, rec: recId, type }}
+        initial={q}
+        from={listing.from}
+        to={listing.to}
+        total={listing.total}
+      />
       <div className="space-y-8">
         {pageStates.map((state) => {
-          const rows = organizations.filter((org) => org.memberStateId === state.id);
+          const rows = rowsByState.get(state.id) || [];
           if (type && rows.length === 0) return null;
           return (
             <section key={state.id} className="space-y-3">
@@ -364,7 +438,7 @@ export default async function InstitutionsPage({
                             </td>
                             {canDelete && (
                               <td className="px-4 py-3 text-right">
-                                <DeleteButton action={`/api/admin/organizations/${org.id}`} />
+                                <DeleteButton action={withBasePath(`/api/admin/organizations/${org.id}`)} />
                               </td>
                             )}
                           </tr>
@@ -378,7 +452,7 @@ export default async function InstitutionsPage({
                                       <InstitutionForm
                                         states={states}
                                         method="PATCH"
-                                        action={`/api/admin/organizations/${org.id}`}
+                                        action={withBasePath(`/api/admin/organizations/${org.id}`)}
                                         idPrefix={`institution-${org.id}-`}
                                         submitLabel="Save authority"
                                         defaults={{
@@ -435,19 +509,31 @@ export default async function InstitutionsPage({
       <LinePager
         page={listing.page}
         pageCount={listing.pageCount}
-        prevHref={listHref(`/${locale}/admin/institutions`, listing.page - 1, {
-          region,
-          country: countryId,
-          rec: recId,
-          type,
-        })}
-        nextHref={listHref(`/${locale}/admin/institutions`, listing.page + 1, {
-          region,
-          country: countryId,
-          rec: recId,
-          type,
-        })}
+        prevHref={`${listHref(listPath, listing.page - 1, listFilters)}#by-country`}
+        nextHref={`${listHref(listPath, listing.page + 1, listFilters)}#by-country`}
       />
+    </div>
+  );
+
+  const tabs = [
+    ...(canWrite ? [{ id: "create", label: "Create", content: createPanel }] : []),
+    ...(canWrite ? [{ id: "grants", label: "Grants", content: grantsPanel }] : []),
+    { id: "by-country", label: "By country", content: byCountryPanel },
+  ];
+
+  return (
+    <div className="space-y-8">
+      <div>
+        <h2 className="text-xl font-semibold">Institutions by country</h2>
+        <p className="mt-1 max-w-3xl text-sm text-[var(--muted)]">
+          Each country keeps its own certification body, standards body, regulator, customs authority, and other offices. They do
+          not share one account. A country belongs to one region and can belong to more than one REC. Only ARSO can create or
+          delete an authority. To create one for a person who already has an account, choose that account. The main account of an
+          authority adds members for that same authority type. Other types in the country are listed for viewing only.
+        </p>
+      </div>
+
+      <DeskTabs tabs={tabs} keepMounted />
     </div>
   );
 }

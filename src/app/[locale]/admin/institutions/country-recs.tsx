@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { apiFetch } from "@/lib/base-path";
 
 export function CountryRecForm({
   memberStateId,
@@ -24,7 +25,7 @@ export function CountryRecForm({
   async function save() {
     setBusy(true);
     setError(null);
-    const res = await fetch(`/api/admin/member-states/${memberStateId}/recs`, {
+    const res = await apiFetch(`/api/admin/member-states/${memberStateId}/recs`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ recIds: ids }),
