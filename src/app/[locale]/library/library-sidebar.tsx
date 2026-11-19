@@ -40,9 +40,15 @@ export function LibrarySidebar({
       .filter((entry) => entry.visible);
   }, [catalogue.sectors, catalogue.committees, needle]);
 
-  function toggleSector(id: string, open: boolean) {
+  function toggleSector(id: string) {
     const next = new Set(expanded);
-    if (open) {
+    if (needle !== "") {
+      next.add(id);
+      setExpanded(next);
+      onFilter({ sectorId: id, committeeId: "", kind: "" });
+      return;
+    }
+    if (expanded.has(id)) {
       next.delete(id);
       setExpanded(next);
       if (filter.sectorId === id) onFilter({ sectorId: "", committeeId: "", kind: "" });
@@ -86,7 +92,7 @@ export function LibrarySidebar({
               <button
                 type="button"
                 aria-expanded={open}
-                onClick={() => toggleSector(sector.id, open)}
+                onClick={() => toggleSector(sector.id)}
                 className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-[var(--surface-2)]"
                 style={filter.sectorId === sector.id && !filter.committeeId ? { background: tone.soft, color: tone.ink } : undefined}
               >

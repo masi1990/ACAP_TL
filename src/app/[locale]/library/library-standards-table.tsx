@@ -35,6 +35,12 @@ export function LibraryStandardsTable({
   const [localQuery, setLocalQuery] = useState("");
   const [limit, setLimit] = useState(PAGE);
   const parentOwnsQuery = onQuery != null;
+  const filterKey = `${filter.sectorId}|${filter.committeeId}|${filter.kind}`;
+  const [seenFilterKey, setSeenFilterKey] = useState(filterKey);
+  if (seenFilterKey !== filterKey) {
+    setSeenFilterKey(filterKey);
+    setLimit(PAGE);
+  }
   const text = (parentOwnsQuery ? query || "" : localQuery).trim().toLowerCase();
 
   const scoped = useMemo(
