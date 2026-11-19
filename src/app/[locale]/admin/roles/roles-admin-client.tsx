@@ -8,9 +8,13 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { notifyCrud } from "@/components/ui/crud-notice";
 import { LinePager } from "@/components/line-pager";
+import { ListToolbar } from "@/components/list-toolbar";
+import { DeskTabs } from "@/app/[locale]/cb/desk-tabs";
 import { listPage } from "@/lib/list-page";
+import { rowMatchesQuery } from "@/lib/list-query";
 import { formatStamp } from "@/lib/utils";
 import type { Permission } from "@/lib/rbac";
+import { apiFetch } from "@/lib/base-path";
 
 type RoleRow = {
   id: string;
@@ -57,7 +61,9 @@ function RoleGroup({
 }) {
   return (
     <div>
-      <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">{title}</p>
+      <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
+        {title}
+      </p>
       {roles.length === 0 ? (
         <p className="px-2 py-2 text-xs text-[var(--muted)]">None</p>
       ) : (
@@ -68,16 +74,22 @@ function RoleGroup({
                 type="button"
                 onClick={() => onSelect(role.code)}
                 className={`flex w-full items-center justify-between gap-2 rounded-md px-2 py-2 text-left hover:bg-[var(--surface-2)] ${
-                  selectedCode === role.code ? "bg-[var(--surface-2)] font-medium" : ""
+                  selectedCode === role.code
+                    ? "bg-[var(--surface-2)] font-medium"
+                    : ""
                 }`}
               >
                 <span className="min-w-0">
                   <span className="block text-sm">{role.name}</span>
-                  <span className="block truncate font-mono text-[10px] text-[var(--muted)]">{role.code}</span>
+                  <span className="block truncate font-mono text-[10px] text-[var(--muted)]">
+                    {role.code}
+                  </span>
                 </span>
                 <span className="flex shrink-0 items-center gap-1">
                   {role.isSystem && <Badge tone="ok">sys</Badge>}
-                  <span className="text-[10px] text-[var(--muted)]">{role._count.assignments}</span>
+                  <span className="text-[10px] text-[var(--muted)]">
+                    {role._count.assignments}
+                  </span>
                 </span>
               </button>
             </li>
@@ -120,6 +132,8 @@ export function RolesAdminClient({
   const [assignments, setAssignments] = useState(initialAssignments);
   const [assignmentPage, setAssignmentPage] = useState(1);
   const [userPage, setUserPage] = useState(1);
+  const [assignmentQ, setAssignmentQ] = useState("");
+  const [userQ, setUserQ] = useState("");
 
   useEffect(() => {
     setRoles(initialRoles);
@@ -131,17 +145,62 @@ export function RolesAdminClient({
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const [selectedCode, setSelectedCode] = useState<string | null>(roles[0]?.code ?? null);
+  const [selectedCode, setSelectedCode] = useState<string | null>(
+    roles[0]?.code ?? null,
+  );
   const selected = useMemo(
     () => roles.find((r) => r.code === selectedCode) || null,
     [roles, selectedCode],
   );
   const selectedPerms = useMemo(
-    () => (selected ? new Set(parsePerms(selected.permissionsJson)) : new Set<string>()),
+    () =>
+      selected
+        ? new Set(parsePerms(selected.permissionsJson))
+        : new Set<string>(),
     [selected],
   );
-  const assignmentView = listPage(String(assignmentPage), assignments.length);
-  const userView = listPage(String(userPage), users.length);
+  const filteredAssignments = useMemo(
+    () =>
+      assignments.filter(
+        (a) =>
+          rowMatchesQuery(a, assignmentQ, [
+            "roleCode",
+            "organizationId",
+            "grantedAt",
+          ]) ||
+          rowMatchesQuery(a.user, assignmentQ, ["name", "email"]) ||
+          rowMatchesQuery(a.role, assignmentQ, ["name", "scope"]) ||
+          (a.organizationId
+            ? rowMatchesQuery(
+                {
+                  name: organizations.find((org) => org.id === a.organizationId)
+                    ?.name,
+                },
+                assignmentQ,
+                ["name"],
+              )
+            : false),
+      ),
+    [assignments, assignmentQ, organizations],
+  );
+  const filteredUsers = useMemo(
+    () =>
+      users.filter(
+        (u) =>
+          rowMatchesQuery(u, userQ, ["name", "email", "rolesGlobal"]) ||
+          u.memberships.some(
+            (m) =>
+              rowMatchesQuery(m, userQ, ["role"]) ||
+              rowMatchesQuery(m.organization, userQ, ["name", "type"]),
+          ),
+      ),
+    [users, userQ],
+  );
+  const assignmentView = listPage(
+    String(assignmentPage),
+    filteredAssignments.length,
+  );
+  const userView = listPage(String(userPage), filteredUsers.length);
 
   // Create custom role
   const [newCode, setNewCode] = useState("");
@@ -176,7 +235,7 @@ export function RolesAdminClient({
     setBusy(true);
     setError(null);
     setMsg(null);
-    const res = await fetch("/api/admin/roles", {
+    const res = await apiFetch("/api/admin/roles", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -202,10 +261,7 @@ export function RolesAdminClient({
     setNewDesc("");
     setNewPerms(new Set());
     router.refresh();
-    setRoles((r) => [
-      ...r,
-      { ...data.role, _count: { assignments: 0 } },
-    ]);
+    setRoles((r) => [...r, { ...data.role, _count: { assignments: 0 } }]);
     setSelectedCode(data.role.code);
   }
 
@@ -213,11 +269,14 @@ export function RolesAdminClient({
     if (!selected) return;
     setBusy(true);
     setError(null);
-    const res = await fetch(`/api/admin/roles/${encodeURIComponent(selected.code)}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ permissions: [...next] }),
-    });
+    const res = await apiFetch(
+      `/api/admin/roles/${encodeURIComponent(selected.code)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ permissions: [...next] }),
+      },
+    );
     const data = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) {
@@ -228,7 +287,9 @@ export function RolesAdminClient({
     }
     setRoles((list) =>
       list.map((r) =>
-        r.code === selected.code ? { ...r, permissionsJson: data.role.permissionsJson } : r,
+        r.code === selected.code
+          ? { ...r, permissionsJson: data.role.permissionsJson }
+          : r,
       ),
     );
     setMsg(`Updated permissions for ${selected.code}`);
@@ -238,7 +299,9 @@ export function RolesAdminClient({
   async function deleteRole(code: string) {
     if (!confirm(`Delete custom role ${code}?`)) return;
     setBusy(true);
-    const res = await fetch(`/api/admin/roles/${encodeURIComponent(code)}`, { method: "DELETE" });
+    const res = await apiFetch(`/api/admin/roles/${encodeURIComponent(code)}`, {
+      method: "DELETE",
+    });
     const data = await res.json().catch(() => ({}));
     setBusy(false);
     if (!res.ok) {
@@ -256,13 +319,14 @@ export function RolesAdminClient({
   async function assignRoleFn() {
     setBusy(true);
     setError(null);
-    const res = await fetch("/api/admin/roles/assignments", {
+    const res = await apiFetch("/api/admin/roles/assignments", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         userId: assignUserId,
         roleCode: assignRoleCode,
-        organizationId: assignRole?.scope === "ORG" ? assignOrgId || null : null,
+        organizationId:
+          assignRole?.scope === "ORG" ? assignOrgId || null : null,
       }),
     });
     const data = await res.json().catch(() => ({}));
@@ -281,7 +345,7 @@ export function RolesAdminClient({
   async function revoke(id: string) {
     if (!confirm("Revoke this role assignment?")) return;
     setBusy(true);
-    const res = await fetch("/api/admin/roles/assignments", {
+    const res = await apiFetch("/api/admin/roles/assignments", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id }),
@@ -309,12 +373,8 @@ export function RolesAdminClient({
     return groups;
   }, [allPermissions]);
 
-  return (
+  const rolesTab = (
     <div className="space-y-8">
-      {(error || msg) && (
-        <p className={`text-sm ${error ? "text-rose-700" : "text-emerald-800"}`}>{error || msg}</p>
-      )}
-
       <section className="grid gap-6 lg:grid-cols-[22rem_1fr]">
         <div className="panel space-y-4 p-2">
           <RoleGroup
@@ -341,24 +401,37 @@ export function RolesAdminClient({
                     {selected.code} · {selected.scope}
                     {selected.isSystem ? " · system" : " · custom"}
                   </p>
-                  <p className="mt-2 text-sm text-[var(--muted)]">{selected.description}</p>
+                  <p className="mt-2 text-sm text-[var(--muted)]">
+                    {selected.description}
+                  </p>
                 </div>
                 {!selected.isSystem && canWrite && (
-                  <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => deleteRole(selected.code)}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => deleteRole(selected.code)}
+                  >
                     Delete role
                   </Button>
                 )}
               </div>
 
               <div>
-                <h4 className="text-sm font-semibold">Permissions (least privilege)</h4>
+                <h4 className="text-sm font-semibold">
+                  Permissions (least privilege)
+                </h4>
                 <p className="mt-1 text-xs text-[var(--muted)]">
-                  Only grant what the role needs. Prefer read over write; avoid roles:write and
-                  impersonate on day-to-day roles.
+                  Only grant what the role needs. Prefer read over write; avoid
+                  roles:write and impersonate on day-to-day roles.
                 </p>
                 <div className="mt-3 grid gap-4 sm:grid-cols-2">
                   {Object.entries(permGroups).map(([group, perms]) => (
-                    <div key={group} className="rounded-md border border-[var(--line)] p-3">
+                    <div
+                      key={group}
+                      className="rounded-md border border-[var(--line)] p-3"
+                    >
                       <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]">
                         {group}
                       </p>
@@ -391,7 +464,9 @@ export function RolesAdminClient({
               </div>
             </>
           ) : (
-            <p className="text-sm text-[var(--muted)]">Select a role to inspect permissions.</p>
+            <p className="text-sm text-[var(--muted)]">
+              Select a role to inspect permissions.
+            </p>
           )}
         </div>
       </section>
@@ -400,8 +475,8 @@ export function RolesAdminClient({
         <section className="panel space-y-4 p-4">
           <h3 className="text-sm font-semibold">Create custom role</h3>
           <p className="text-xs text-[var(--muted)]">
-            Custom roles start empty of elevated privileges. Principle of least privilege: add only
-            the permissions this job function requires.
+            Custom roles start empty of elevated privileges. Principle of least
+            privilege: add only the permissions this job function requires.
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="grid gap-1">
@@ -415,18 +490,28 @@ export function RolesAdminClient({
             </div>
             <div className="grid gap-1">
               <Label htmlFor="newName">Display name</Label>
-              <Input id="newName" value={newName} onChange={(e) => setNewName(e.target.value)} />
+              <Input
+                id="newName"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+              />
             </div>
             <div className="grid gap-1 sm:col-span-2">
               <Label htmlFor="newDesc">Description</Label>
-              <Input id="newDesc" value={newDesc} onChange={(e) => setNewDesc(e.target.value)} />
+              <Input
+                id="newDesc"
+                value={newDesc}
+                onChange={(e) => setNewDesc(e.target.value)}
+              />
             </div>
             <div className="grid gap-1">
               <Label htmlFor="newScope">Scope</Label>
               <select
                 id="newScope"
                 value={newScope}
-                onChange={(e) => setNewScope(e.target.value as "GLOBAL" | "ORG")}
+                onChange={(e) =>
+                  setNewScope(e.target.value as "GLOBAL" | "ORG")
+                }
                 className="h-10 rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 text-sm"
               >
                 <option value="GLOBAL">GLOBAL</option>
@@ -437,83 +522,125 @@ export function RolesAdminClient({
           <div className="grid gap-2 sm:grid-cols-3">
             {allPermissions.map((p) => (
               <label key={p} className="flex items-center gap-2 text-xs">
-                <input type="checkbox" checked={newPerms.has(p)} onChange={() => toggleNewPerm(p)} />
+                <input
+                  type="checkbox"
+                  checked={newPerms.has(p)}
+                  onChange={() => toggleNewPerm(p)}
+                />
                 <span className="font-mono">{p}</span>
               </label>
             ))}
           </div>
-          <Button type="button" disabled={busy || !newCode || !newName || newPerms.size === 0} onClick={createRole}>
+          <Button
+            type="button"
+            disabled={busy || !newCode || !newName || newPerms.size === 0}
+            onClick={createRole}
+          >
             Create role
           </Button>
         </section>
       )}
+    </div>
+  );
 
-      {canAssign && (
-        <section className="panel space-y-4 p-4">
-          <h3 className="text-sm font-semibold">Assign role to user</h3>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <div className="grid gap-1">
-              <Label>User</Label>
-              <select
-                value={assignUserId}
-                onChange={(e) => setAssignUserId(e.target.value)}
-                className="h-10 rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 text-sm"
-              >
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.email} ({u.name})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="grid gap-1">
-              <Label>Role</Label>
-              <select
-                value={assignRoleCode}
-                onChange={(e) => setAssignRoleCode(e.target.value)}
-                className="h-10 rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 text-sm"
-              >
-                {roles.map((r) => (
-                  <option key={r.code} value={r.code}>
-                    {r.code} ({r.scope})
-                  </option>
-                ))}
-              </select>
-            </div>
-            {assignRole?.scope === "ORG" && (
-              <div className="grid gap-1">
-                <Label>Organisation</Label>
-                <select
-                  value={assignOrgId}
-                  onChange={(e) => setAssignOrgId(e.target.value)}
-                  className="h-10 rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 text-sm"
-                >
-                  <option value="">Select org…</option>
-                  {orgOptions.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.name} ({o.type})
-                    </option>
-                  ))}
-                </select>
-                {orgOptions.length === 0 && (
-                  <p className="text-xs text-[var(--muted)]">No organisation is available for this assignment.</p>
-                )}
-              </div>
-            )}
+  const assignTab = canAssign ? (
+    <div className="space-y-8">
+      <section className="panel space-y-4 p-4">
+        <h3 className="text-sm font-semibold">Assign role to user</h3>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-1">
+            <Label>User</Label>
+            <select
+              value={assignUserId}
+              onChange={(e) => setAssignUserId(e.target.value)}
+              className="h-10 rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 text-sm"
+            >
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.email} ({u.name})
+                </option>
+              ))}
+            </select>
           </div>
-          <Button
-            type="button"
-            disabled={busy || !assignUserId || !assignRoleCode || (assignRole?.scope === "ORG" && !assignOrgId)}
-            onClick={assignRoleFn}
-          >
-            Assign
-          </Button>
-        </section>
-      )}
+          <div className="grid gap-1">
+            <Label>Role</Label>
+            <select
+              value={assignRoleCode}
+              onChange={(e) => setAssignRoleCode(e.target.value)}
+              className="h-10 rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 text-sm"
+            >
+              {roles.map((r) => (
+                <option key={r.code} value={r.code}>
+                  {r.code} ({r.scope})
+                </option>
+              ))}
+            </select>
+          </div>
+          {assignRole?.scope === "ORG" && (
+            <div className="grid gap-1">
+              <Label>Organisation</Label>
+              <select
+                value={assignOrgId}
+                onChange={(e) => setAssignOrgId(e.target.value)}
+                className="h-10 rounded-md border border-[var(--line)] bg-[var(--surface)] px-3 text-sm"
+              >
+                <option value="">Select org…</option>
+                {orgOptions.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name} ({o.type})
+                  </option>
+                ))}
+              </select>
+              {orgOptions.length === 0 && (
+                <p className="text-xs text-[var(--muted)]">
+                  No organisation is available for this assignment.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+        <Button
+          type="button"
+          disabled={
+            busy ||
+            !assignUserId ||
+            !assignRoleCode ||
+            (assignRole?.scope === "ORG" && !assignOrgId)
+          }
+          onClick={assignRoleFn}
+        >
+          Assign
+        </Button>
+      </section>
+    </div>
+  ) : (
+    <p className="text-sm text-[var(--muted)]">
+      You do not have permission to assign roles.
+    </p>
+  );
 
+  const assignmentsTab = (
+    <div className="space-y-8">
       <section className="panel overflow-x-auto">
         <div className="border-b border-[var(--line)] bg-[var(--surface-2)] px-4 py-2 text-sm font-semibold">
           Current assignments
+        </div>
+        <div className="border-b border-[var(--line)] px-4 py-3">
+          <ListToolbar
+            value={assignmentQ}
+            onChange={(q) => {
+              setAssignmentQ(q);
+              setAssignmentPage(1);
+            }}
+            onClear={() => {
+              setAssignmentQ("");
+              setAssignmentPage(1);
+            }}
+            placeholder="User, email, role, organisation"
+            from={assignmentView.from}
+            to={assignmentView.to}
+            total={assignmentView.total}
+          />
         </div>
         <table className="w-full min-w-[640px] text-left text-sm">
           <thead>
@@ -526,45 +653,87 @@ export function RolesAdminClient({
             </tr>
           </thead>
           <tbody>
-            {assignments.length === 0 && (
+            {filteredAssignments.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-6 text-center text-[var(--muted)]">
-                  No role assignments yet.
+                <td
+                  colSpan={5}
+                  className="px-4 py-6 text-center text-[var(--muted)]"
+                >
+                  {assignments.length === 0
+                    ? "No role assignments yet."
+                    : "No assignments match your search."}
                 </td>
               </tr>
             )}
-            {assignments.slice(assignmentView.skip, assignmentView.skip + assignmentView.take).map((a) => (
-              <tr key={a.id} className="border-b border-[var(--line)]/50">
-                <td className="px-4 py-2">
-                  <div>{a.user.name}</div>
-                  <div className="text-xs text-[var(--muted)]">{a.user.email}</div>
-                </td>
-                <td className="px-4 py-2 font-mono text-xs">{a.roleCode}</td>
-                <td className="px-4 py-2 text-xs text-[var(--muted)]">
-                  {a.organizationId
-                    ? organizations.find((org) => org.id === a.organizationId)?.name || a.organizationId
-                    : "—"}
-                </td>
-                <td className="px-4 py-2 text-xs">{formatStamp(a.grantedAt)}</td>
-                <td className="px-4 py-2 text-right">
-                  {canAssign && (
-                    <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => revoke(a.id)}>
-                      Revoke
-                    </Button>
-                  )}
-                </td>
-              </tr>
-            ))}
+            {filteredAssignments
+              .slice(
+                assignmentView.skip,
+                assignmentView.skip + assignmentView.take,
+              )
+              .map((a) => (
+                <tr key={a.id} className="border-b border-[var(--line)]/50">
+                  <td className="px-4 py-2">
+                    <div>{a.user.name}</div>
+                    <div className="text-xs text-[var(--muted)]">
+                      {a.user.email}
+                    </div>
+                  </td>
+                  <td className="px-4 py-2 font-mono text-xs">{a.roleCode}</td>
+                  <td className="px-4 py-2 text-xs text-[var(--muted)]">
+                    {a.organizationId
+                      ? organizations.find((org) => org.id === a.organizationId)
+                          ?.name || a.organizationId
+                      : "—"}
+                  </td>
+                  <td className="px-4 py-2 text-xs">
+                    {formatStamp(a.grantedAt)}
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    {canAssign && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => revoke(a.id)}
+                      >
+                        Revoke
+                      </Button>
+                    )}
+                  </td>
+                </tr>
+              ))}
           </tbody>
         </table>
         <div className="border-t border-[var(--line)] px-4 py-3">
-          <LinePager page={assignmentView.page} pageCount={assignmentView.pageCount} onPage={setAssignmentPage} />
+          <LinePager
+            page={assignmentView.page}
+            pageCount={assignmentView.pageCount}
+            onPage={setAssignmentPage}
+          />
         </div>
       </section>
 
       <section className="panel overflow-x-auto">
         <div className="border-b border-[var(--line)] bg-[var(--surface-2)] px-4 py-2 text-sm font-semibold">
           Users &amp; memberships
+        </div>
+        <div className="border-b border-[var(--line)] px-4 py-3">
+          <ListToolbar
+            value={userQ}
+            onChange={(q) => {
+              setUserQ(q);
+              setUserPage(1);
+            }}
+            onClear={() => {
+              setUserQ("");
+              setUserPage(1);
+            }}
+            placeholder="User, email, role, organisation"
+            from={userView.from}
+            to={userView.to}
+            total={userView.total}
+          />
         </div>
         <table className="w-full min-w-[640px] text-left text-sm">
           <thead>
@@ -575,30 +744,72 @@ export function RolesAdminClient({
             </tr>
           </thead>
           <tbody>
-            {users.slice(userView.skip, userView.skip + userView.take).map((u) => (
-              <tr key={u.id} className="border-b border-[var(--line)]/50 align-top">
-                <td className="px-4 py-2">
-                  <div>{u.name}</div>
-                  <div className="text-xs text-[var(--muted)]">{u.email}</div>
-                </td>
-                <td className="px-4 py-2 font-mono text-xs">{u.rolesGlobal || "—"}</td>
-                <td className="px-4 py-2 text-xs">
-                  {u.memberships.length === 0
-                    ? "—"
-                    : u.memberships.map((m) => (
-                        <div key={m.organization.id}>
-                          {m.organization.name} ({m.organization.type}) · {m.role}
-                        </div>
-                      ))}
+            {filteredUsers.length === 0 && (
+              <tr>
+                <td
+                  colSpan={3}
+                  className="px-4 py-6 text-center text-[var(--muted)]"
+                >
+                  No users match your search.
                 </td>
               </tr>
-            ))}
+            )}
+            {filteredUsers
+              .slice(userView.skip, userView.skip + userView.take)
+              .map((u) => (
+                <tr
+                  key={u.id}
+                  className="border-b border-[var(--line)]/50 align-top"
+                >
+                  <td className="px-4 py-2">
+                    <div>{u.name}</div>
+                    <div className="text-xs text-[var(--muted)]">{u.email}</div>
+                  </td>
+                  <td className="px-4 py-2 font-mono text-xs">
+                    {u.rolesGlobal || "—"}
+                  </td>
+                  <td className="px-4 py-2 text-xs">
+                    {u.memberships.length === 0
+                      ? "—"
+                      : u.memberships.map((m) => (
+                          <div key={m.organization.id}>
+                            {m.organization.name} ({m.organization.type}) ·{" "}
+                            {m.role}
+                          </div>
+                        ))}
+                  </td>
+                </tr>
+              ))}
           </tbody>
         </table>
         <div className="border-t border-[var(--line)] px-4 py-3">
-          <LinePager page={userView.page} pageCount={userView.pageCount} onPage={setUserPage} />
+          <LinePager
+            page={userView.page}
+            pageCount={userView.pageCount}
+            onPage={setUserPage}
+          />
         </div>
       </section>
+    </div>
+  );
+
+  return (
+    <div className="space-y-6">
+      {(error || msg) && (
+        <p
+          className={`text-sm ${error ? "text-rose-700" : "text-emerald-800"}`}
+        >
+          {error || msg}
+        </p>
+      )}
+      <DeskTabs
+        keepMounted
+        tabs={[
+          { id: "roles", label: "Roles", content: rolesTab },
+          { id: "assign", label: "Assign", content: assignTab },
+          { id: "assignments", label: "Assignments", content: assignmentsTab },
+        ]}
+      />
     </div>
   );
 }
