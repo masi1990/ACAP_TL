@@ -268,7 +268,7 @@ model LibraryStandardRequestItem {
   requestId       String
   request         LibraryStandardRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
   standardId      String?
-  standard        Standard?              @relation(fields: [standardId], references: [id])
+  standard        Standard?              @relation(fields: [standardId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   designationText String                 @default("")
   titleText       String                 @default("")
   missingText     Boolean                @default(false)
