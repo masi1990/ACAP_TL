@@ -38,7 +38,10 @@ export function DeskTabs({
 
   return (
     <div>
-      <div className="flex gap-2 overflow-x-auto border-b border-[var(--line)]" role="tablist">
+      <div
+        className="sticky top-0 z-20 -mx-1 flex gap-2 overflow-x-auto border-b border-[var(--line)] bg-[var(--surface)] px-1 backdrop-blur supports-[backdrop-filter]:bg-[color-mix(in_srgb,var(--surface)_92%,transparent)]"
+        role="tablist"
+      >
         {tabs.map((tab) => {
           const selected = tab.id === current?.id;
           return (
@@ -47,7 +50,10 @@ export function DeskTabs({
               type="button"
               role="tab"
               aria-selected={selected}
-              onClick={() => select(tab.id)}
+              onClick={() => {
+                select(tab.id);
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }}
               className={cn(
                 "shrink-0 border-b-2 px-3 py-2 text-sm",
                 selected

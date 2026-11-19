@@ -47,6 +47,7 @@ function textMatch(q: string) {
       { titleAr: { contains: q, mode: "insensitive" as const } },
       { technicalCommittee: { code: { contains: q, mode: "insensitive" as const } } },
       { technicalCommittee: { name: { contains: q, mode: "insensitive" as const } } },
+      { technicalCommittee: { scope: { contains: q, mode: "insensitive" as const } } },
     ],
   };
 }

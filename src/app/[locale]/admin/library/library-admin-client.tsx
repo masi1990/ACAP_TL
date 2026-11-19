@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { apiFetch } from "@/lib/base-path";
 
 type Country = { id: string; name: string };
 type Institution = { id: string; name: string; countries: Country[] };
@@ -12,6 +13,7 @@ export function LibraryAdminClient(props: {
   institutions: Institution[];
   entryPoints: { id: string; name: string; organizationId: string | null }[];
   standards: Standard[];
+  requestNotifyCc: string[];
   requests: { id: string; email: string; name: string; organization: string; country: string }[];
   standardRequests: {
     id: string;
@@ -31,12 +33,15 @@ export function LibraryAdminClient(props: {
 }) {
   const router = useRouter();
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
   const [orgId, setOrgId] = useState("");
+  const [ccText, setCcText] = useState(props.requestNotifyCc.join("\n"));
   const org = props.institutions.find((item) => item.id === orgId);
 
   async function post(url: string, body: unknown) {
     setError("");
-    const res = await fetch(url, {
+    setMessage("");
+    const res = await apiFetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -44,6 +49,24 @@ export function LibraryAdminClient(props: {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) setError(data.error || "Request failed");
     else router.refresh();
+  }
+
+  async function saveNotifyCc(event: React.FormEvent) {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+    const res = await apiFetch("/api/admin/library/notify-cc", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: ccText }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) setError(data.error || "Could not save copy list");
+    else {
+      setCcText((data.emails || []).join("\n"));
+      setMessage("Colleague copy list saved. They will be CC’d on new standard requests.");
+      router.refresh();
+    }
   }
 
   return (
@@ -55,6 +78,28 @@ export function LibraryAdminClient(props: {
         </p>
       </div>
       {error ? <p className="text-sm text-rose-700">{error}</p> : null}
+      {message ? <p className="text-sm text-emerald-800">{message}</p> : null}
+
+      {props.canWrite ? (
+        <form className="grid gap-3 rounded-xl border border-[var(--line)] p-4" onSubmit={saveNotifyCc}>
+          <h2 className="text-lg font-semibold">Copy colleagues on standard requests</h2>
+          <p className="text-sm text-[var(--muted)]">
+            These addresses are CC’d together with the requestor when someone asks for particular standards.
+            One email per line.
+          </p>
+          <label className="grid gap-1 text-sm">
+            Colleague emails
+            <textarea
+              value={ccText}
+              onChange={(event) => setCcText(event.target.value)}
+              rows={4}
+              placeholder={"colleague@arso-oran.org\nteam@arso-oran.org"}
+              className="rounded-md border px-3 py-2 font-mono text-sm"
+            />
+          </label>
+          <button className="w-fit rounded-md bg-[var(--ink)] px-4 py-2 text-sm text-white">Save copy list</button>
+        </form>
+      ) : null}
 
       {props.canWrite ? (
         <form

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Locale } from "@/lib/i18n";
+import { apiFetch } from "@/lib/base-path";
 import { LibraryCatalogue } from "./library-catalogue";
 import type { LibraryFacet, LibraryStandardRow } from "./library-types";
 
@@ -46,14 +47,19 @@ export function StandardRequestForm({
     const controller = new AbortController();
     const timer = setTimeout(() => {
       setSearching(true);
-      fetch(`/api/library/options?${params}`, { signal: controller.signal })
-        .then((res) => res.json())
+      apiFetch(`/api/library/options?${params}`, { signal: controller.signal })
+        .then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || "Could not load standards");
+          return data;
+        })
         .then((data) => {
           setInstitutions(data.institutions || []);
           setStandardCount(data.standardCount || 0);
           if (data.facets) setFacets(data.facets);
           setResults(data.standards || []);
           setMatchCount(data.matchCount || 0);
+          setError("");
         })
         .catch((err: unknown) => {
           if (err instanceof DOMException && err.name === "AbortError") return;
@@ -90,7 +96,7 @@ export function StandardRequestForm({
     const list = numbers.trim();
     if (!list) return;
     setError("");
-    const res = await fetch(`/api/library/options?numbers=${encodeURIComponent(list)}`);
+    const res = await apiFetch(`/api/library/options?numbers=${encodeURIComponent(list)}`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       setError("Could not look up those numbers");
@@ -114,7 +120,7 @@ export function StandardRequestForm({
       return;
     }
     const form = new FormData(event.currentTarget);
-    const res = await fetch("/api/library/standard-requests", {
+    const res = await apiFetch("/api/library/standard-requests", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -199,7 +205,7 @@ export function StandardRequestForm({
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Number, name, or committee — ARS 466, maize, TC 12"
+            placeholder="Number, title, scope, or committee — ARS 466, maize, dairy, TC 12"
             className="rounded-md border border-[var(--line)] px-3 py-2"
           />
         </label>

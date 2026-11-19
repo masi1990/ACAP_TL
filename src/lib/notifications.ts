@@ -287,6 +287,7 @@ export async function queueLibraryStandardRequest(input: {
   countryName: string;
   note: string;
   lines: string[];
+  colleagueEmails?: string[];
 }) {
   await enqueueNotification({
     kind: NotificationKind.LIBRARY_STANDARD_REQUEST,
@@ -300,6 +301,7 @@ export async function queueLibraryStandardRequest(input: {
       countryName: input.countryName,
       note: input.note,
       lines: input.lines.join(" | "),
+      colleagueEmails: (input.colleagueEmails || []).join(","),
     },
   });
 }
@@ -628,19 +630,28 @@ async function prepareJob(job: {
         .split(" | ")
         .map((line) => line.trim())
         .filter(Boolean);
+      const requestor = payload.email?.trim().toLowerCase() || "";
+      const colleagues = String(payload.colleagueEmails || "")
+        .split(/[,;\s]+/)
+        .map((email) => email.trim().toLowerCase())
+        .filter(Boolean);
       return {
         recipients: onlyEmails([process.env.NOTIFY_ADMIN?.trim().toLowerCase()]),
-        cc: onlyEmails([payload.email?.trim().toLowerCase()]),
+        cc: onlyEmails([requestor, ...colleagues]),
         subject: `Library standard request from ${payload.name || payload.email}`,
         text: [
-          `${payload.name || ""} <${payload.email || ""}>`,
-          payload.organizationName || "",
-          payload.countryName || "",
+          "Requestor (reply to continue this request):",
+          `Name: ${payload.name || ""}`,
+          `Email: ${payload.email || ""}`,
+          `Institution: ${payload.organizationName || ""}`,
+          `Country: ${payload.countryName || ""}`,
           "",
           "Requested:",
           ...lines.map((line) => `- ${line}`),
           payload.note ? "" : undefined,
           payload.note ? `Note: ${payload.note}` : undefined,
+          "",
+          "The requestor is copied on this email so ARSO staff can continue the thread with them.",
         ]
           .filter((line): line is string => line !== undefined)
           .join("\n"),

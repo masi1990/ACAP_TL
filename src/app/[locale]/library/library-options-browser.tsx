@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Locale } from "@/lib/i18n";
+import { apiFetch } from "@/lib/base-path";
 import { LibraryCatalogue } from "./library-catalogue";
 import type { LibraryFacet, LibraryFilter, LibraryStandardRow } from "./library-types";
 
@@ -25,8 +26,12 @@ export function LibraryOptionsBrowser({ locale }: { locale: Locale }) {
     const controller = new AbortController();
     const timer = setTimeout(() => {
       setLoading(true);
-      fetch(`/api/library/options?${params}`, { signal: controller.signal })
-        .then((res) => res.json())
+      apiFetch(`/api/library/options?${params}`, { signal: controller.signal })
+        .then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || "Could not load standards");
+          return data;
+        })
         .then((data) => {
           if (data.facets) setFacets(data.facets);
           setRows(data.standards || []);

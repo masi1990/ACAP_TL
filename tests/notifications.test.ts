@@ -185,7 +185,7 @@ describe("notification delivery", () => {
     }
   });
 
-  it("queues LIBRARY_STANDARD_REQUEST and sends to admin with requestor cc only", async () => {
+  it("queues LIBRARY_STANDARD_REQUEST and CCs requestor plus colleagues", async () => {
     if (skip) return;
     const stamp = Date.now();
     const requestId = `req-${stamp}`;
@@ -200,6 +200,7 @@ describe("notification delivery", () => {
         countryName: "Kenya",
         note: "Please prioritise",
         lines: ["ARS 1: Cement", "ARS 2: Steel"],
+        colleagueEmails: [`colleague-${stamp}@example.com`],
       });
       const jobs = await prisma.notificationJob.findMany({
         where: { kind: "LIBRARY_STANDARD_REQUEST", entityId: requestId },
@@ -214,10 +215,13 @@ describe("notification delivery", () => {
       const result = await dispatchDueNotifications(5, [jobs[0]!.id]);
       expect(result.sent).toBe(1);
       expect(sendMail).toHaveBeenCalledTimes(1);
-      const call = sendMail.mock.calls[0]![0] as { to: string; cc?: string[]; text: string; subject: string };
+      const call = sendMail.mock.calls[0]![0] as { to: string; cc?: string | string[]; text: string; subject: string };
       expect(call.to).toBe(`admin-${stamp}@example.com`);
-      expect(call.cc).toEqual([`officer-${stamp}@example.com`]);
+      const cc = Array.isArray(call.cc) ? call.cc : String(call.cc || "").split(",").map((part) => part.trim());
+      expect(cc).toEqual(expect.arrayContaining([`officer-${stamp}@example.com`, `colleague-${stamp}@example.com`]));
       expect(call.subject).toContain("Req Officer");
+      expect(call.text).toContain("Requestor (reply to continue this request):");
+      expect(call.text).toContain(`Email: officer-${stamp}@example.com`);
       expect(call.text).toContain("- ARS 1: Cement");
       expect(call.text).toContain("- ARS 2: Steel");
       expect(call.text).toContain("Note: Please prioritise");

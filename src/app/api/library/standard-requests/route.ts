@@ -5,6 +5,7 @@ import { appendAuditEvent } from "@/lib/audit";
 import { countryAllowed, isLibraryInstitution, logLibraryActivity } from "@/lib/library";
 import { standardVersionHasText } from "@/lib/library-text";
 import { buildRequestLines, parseOtherItems } from "@/lib/library-standard-request";
+import { listLibraryRequestCcEmails } from "@/lib/library-request-notify";
 import { notifyAfterCommit, queueLibraryStandardRequest } from "@/lib/notifications";
 
 export async function POST(req: NextRequest) {
@@ -90,6 +91,7 @@ export async function POST(req: NextRequest) {
     organizationId: org.id,
     after: { email, count: known.length + otherItems.length, other: otherItems.length },
   });
+  const colleagueEmails = await listLibraryRequestCcEmails();
   await queueLibraryStandardRequest({
     requestId: row.id,
     email,
@@ -98,6 +100,7 @@ export async function POST(req: NextRequest) {
     countryName: memberState?.name || memberStateId,
     note,
     lines: buildRequestLines({ known, other: otherItems }),
+    colleagueEmails,
   });
   await notifyAfterCommit();
   return NextResponse.json({ ok: true });

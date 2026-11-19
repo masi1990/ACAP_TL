@@ -4,6 +4,7 @@ import { getSessionUser } from "@/lib/auth";
 import { can } from "@/lib/rbac";
 import { isLocale, type Locale } from "@/lib/i18n";
 import { loadLibraryInstitutions } from "@/lib/library";
+import { listLibraryRequestCcEmails } from "@/lib/library-request-notify";
 import { ClientRedirect } from "@/components/admin/client-redirect";
 import { LibraryAdminClient } from "./library-admin-client";
 
@@ -24,7 +25,7 @@ export default async function AdminLibraryPage({
   }
   const sp = await searchParams;
   const institutions = await loadLibraryInstitutions();
-  const [requests, standardRequests, standards, entryPoints, activity, audits] = await Promise.all([
+  const [requests, standardRequests, standards, entryPoints, activity, audits, requestNotifyCc] = await Promise.all([
     prisma.libraryAccessRequest.findMany({
       where: { status: "PENDING" },
       include: { user: true, organization: true, memberState: true },
@@ -75,6 +76,7 @@ export default async function AdminLibraryPage({
       const emailById = new Map(actors.map((actor) => [actor.id, actor.email]));
       return rows.map((row) => ({ ...row, email: row.actorUserId ? emailById.get(row.actorUserId) || "" : "" }));
     })(),
+    listLibraryRequestCcEmails(),
   ]);
 
   return (
@@ -92,6 +94,7 @@ export default async function AdminLibraryPage({
         }))}
         entryPoints={entryPoints}
         standards={standards}
+        requestNotifyCc={requestNotifyCc}
         requests={requests.map((row) => ({
           id: row.id,
           email: row.user.email,

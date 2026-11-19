@@ -50,3 +50,6 @@ next-env.d.ts
 /src/generated/prisma
 
 __pycache__/
+data/mail-outbox/
+.worktrees/
+data/library-request-cc.json
