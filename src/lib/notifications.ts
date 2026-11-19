@@ -24,6 +24,7 @@ export const NotificationKind = {
   CB_LICENSE_EXPIRY: "CB_LICENSE_EXPIRY",
   LIBRARY_ROLE_ASSIGNED: "LIBRARY_ROLE_ASSIGNED",
   LIBRARY_RELEASE: "LIBRARY_RELEASE",
+  LIBRARY_STANDARD_REQUEST: "LIBRARY_STANDARD_REQUEST",
 } as const;
 
 type JobDb = Prisma.TransactionClient | PrismaClient;
@@ -40,7 +41,7 @@ export type EnqueueInput = {
 };
 
 type Prepared =
-  | { subject: string; text: string; recipients: string[] }
+  | { subject: string; text: string; recipients: string[]; cc?: string[] }
   | { drop: "sent" | "failed"; reason: string };
 
 function appBase() {
@@ -278,6 +279,31 @@ export async function queueLibraryRelease(input: {
   });
 }
 
+export async function queueLibraryStandardRequest(input: {
+  requestId: string;
+  email: string;
+  name: string;
+  organizationName: string;
+  countryName: string;
+  note: string;
+  lines: string[];
+}) {
+  await enqueueNotification({
+    kind: NotificationKind.LIBRARY_STANDARD_REQUEST,
+    dedupeKey: `${NotificationKind.LIBRARY_STANDARD_REQUEST}:${input.requestId}`,
+    entityType: "LibraryStandardRequest",
+    entityId: input.requestId,
+    payload: {
+      email: input.email,
+      name: input.name,
+      organizationName: input.organizationName,
+      countryName: input.countryName,
+      note: input.note,
+      lines: input.lines.join(" | "),
+    },
+  });
+}
+
 export async function queueStoreFulfilled(input: {
   orderId: string;
   buyerEmail: string;
@@ -475,7 +501,12 @@ export async function dispatchDueNotifications(limit = 20, onlyIds?: string[]) {
         continue;
       }
       for (const to of prepared.recipients) {
-        await sendMail({ to, subject: prepared.subject, text: prepared.text });
+        await sendMail({
+          to,
+          subject: prepared.subject,
+          text: prepared.text,
+          ...(prepared.cc?.length && to === prepared.recipients[0] ? { cc: prepared.cc } : {}),
+        });
       }
       await prisma.notificationJob.update({
         where: { id: job.id },
@@ -589,6 +620,29 @@ async function prepareJob(job: {
           titles.length ? `Standards: ${titles.join(", ")}` : "",
         ]
           .filter(Boolean)
+          .join("\n"),
+      };
+    }
+    case NotificationKind.LIBRARY_STANDARD_REQUEST: {
+      const lines = String(payload.lines || "")
+        .split(" | ")
+        .map((line) => line.trim())
+        .filter(Boolean);
+      return {
+        recipients: onlyEmails([process.env.NOTIFY_ADMIN?.trim().toLowerCase()]),
+        cc: onlyEmails([payload.email?.trim().toLowerCase()]),
+        subject: `Library standard request from ${payload.name || payload.email}`,
+        text: [
+          `${payload.name || ""} <${payload.email || ""}>`,
+          payload.organizationName || "",
+          payload.countryName || "",
+          "",
+          "Requested:",
+          ...lines.map((line) => `- ${line}`),
+          payload.note ? "" : undefined,
+          payload.note ? `Note: ${payload.note}` : undefined,
+        ]
+          .filter((line): line is string => line !== undefined)
           .join("\n"),
       };
     }

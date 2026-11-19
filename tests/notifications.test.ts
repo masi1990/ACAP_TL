@@ -18,6 +18,7 @@ import {
   dispatchDueNotifications,
   emailsForOrganizations,
   enqueueNotification,
+  queueLibraryStandardRequest,
   queueOrgInvite,
 } from "../src/lib/notifications";
 
@@ -181,6 +182,48 @@ describe("notification delivery", () => {
       await prisma.orderLine.deleteMany({ where: { orderId: order.id } });
       await prisma.order.delete({ where: { id: order.id } });
       if (createdCatalog) await prisma.catalogItem.delete({ where: { id: item.id } });
+    }
+  });
+
+  it("queues LIBRARY_STANDARD_REQUEST and sends to admin with requestor cc only", async () => {
+    if (skip) return;
+    const stamp = Date.now();
+    const requestId = `req-${stamp}`;
+    const previousAdmin = process.env.NOTIFY_ADMIN;
+    process.env.NOTIFY_ADMIN = `admin-${stamp}@example.com`;
+    try {
+      await queueLibraryStandardRequest({
+        requestId,
+        email: `officer-${stamp}@example.com`,
+        name: "Req Officer",
+        organizationName: "Req Org",
+        countryName: "Kenya",
+        note: "Please prioritise",
+        lines: ["ARS 1: Cement", "ARS 2: Steel"],
+      });
+      const jobs = await prisma.notificationJob.findMany({
+        where: { kind: "LIBRARY_STANDARD_REQUEST", entityId: requestId },
+      });
+      jobIds.push(...jobs.map((job) => job.id));
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]?.payloadJson).toContain(`officer-${stamp}@example.com`);
+      expect(jobs[0]?.payloadJson).toContain("ARS 1: Cement | ARS 2: Steel");
+
+      sendMail.mockClear();
+      sendMail.mockResolvedValue(undefined);
+      const result = await dispatchDueNotifications(5, [jobs[0]!.id]);
+      expect(result.sent).toBe(1);
+      expect(sendMail).toHaveBeenCalledTimes(1);
+      const call = sendMail.mock.calls[0]![0] as { to: string; cc?: string[]; text: string; subject: string };
+      expect(call.to).toBe(`admin-${stamp}@example.com`);
+      expect(call.cc).toEqual([`officer-${stamp}@example.com`]);
+      expect(call.subject).toContain("Req Officer");
+      expect(call.text).toContain("- ARS 1: Cement");
+      expect(call.text).toContain("- ARS 2: Steel");
+      expect(call.text).toContain("Note: Please prioritise");
+    } finally {
+      if (previousAdmin === undefined) delete process.env.NOTIFY_ADMIN;
+      else process.env.NOTIFY_ADMIN = previousAdmin;
     }
   });
 });
