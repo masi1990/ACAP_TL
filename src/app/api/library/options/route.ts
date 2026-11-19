@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { isLocale, type Locale } from "@/lib/i18n";
 import { loadLibraryInstitutions } from "@/lib/library";
+import { standardVersionHasText } from "@/lib/library-text";
 import { standardKindOrNull, standardKindQuery } from "@/lib/standard-kinds";
 
 const PAGE = 200;
@@ -23,6 +24,15 @@ const standardSelect = {
       code: true,
       name: true,
       sector: { select: { id: true, code: true, name: true } },
+    },
+  },
+  versions: {
+    where: { publicationStatus: "PUBLISHED" as const },
+    orderBy: { year: "desc" as const },
+    take: 1,
+    select: {
+      sourcePdfUri: true,
+      languageFiles: { select: { sourcePdfUri: true } },
     },
   },
 } as const;
@@ -247,6 +257,7 @@ function shape(
       name: string;
       sector: { id: string; code: string; name: string };
     } | null;
+    versions: Array<{ sourcePdfUri: string | null; languageFiles: Array<{ sourcePdfUri: string | null }> }>;
   },
   locale: Locale,
 ) {
@@ -264,5 +275,6 @@ function shape(
     committeeId: committee?.id || "unassigned",
     committeeCode: committee?.code || "",
     committeeName: committee?.name || "Not yet classified",
+    hasText: standardVersionHasText(standard.versions[0] || {}),
   };
 }

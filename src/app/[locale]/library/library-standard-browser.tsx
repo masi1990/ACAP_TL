@@ -20,6 +20,8 @@ export type LibraryStandardRow = {
   secretariatName?: string;
   secretariatIso2?: string;
   languages?: { code: string; href: string }[];
+  /** True when the latest published version has a source PDF to read text from. */
+  hasText: boolean;
 };
 
 export type LibraryCommitteeFacet = {

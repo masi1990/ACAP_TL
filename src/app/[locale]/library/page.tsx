@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import { getSessionUser } from "@/lib/auth";
 import { isLocale, type Locale } from "@/lib/i18n";
 import { logLibraryActivity, userLibraryView } from "@/lib/library";
+import { standardVersionHasText } from "@/lib/library-text";
 import { standardKindOrNull, publishedLocales } from "@/lib/standard-kinds";
 import { LibraryHoldings, type LibraryStandardRow } from "./library-standard-browser";
 import { StandardRequestForm } from "./standard-request-form";
@@ -34,7 +35,7 @@ function libraryRow(standard: {
     secretariat: { iso2: string; name: string } | null;
     sector: { id: string; code: string; name: string };
   } | null;
-  versions: Array<{ languageFiles: Array<{ locale: string }>; authoritativeLocale: string; sourcePdfUri: string | null }>;
+  versions: Array<{ languageFiles: Array<{ locale: string; sourcePdfUri: string }>; authoritativeLocale: string; sourcePdfUri: string | null }>;
 }, locale: Locale): LibraryStandardRow[] {
   const version = standard.versions[0];
   if (!version) return [];
@@ -58,6 +59,7 @@ function libraryRow(standard: {
         code,
         href: `/api/library/standards/${standard.id}/file?lang=${code}`,
       })),
+      hasText: standardVersionHasText(version),
     },
   ];
 }
