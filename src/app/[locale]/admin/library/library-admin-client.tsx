@@ -3,10 +3,54 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/base-path";
+import { DeskTabs } from "@/app/[locale]/cb/desk-tabs";
+import { LinePager } from "@/components/line-pager";
+import { ListToolbar } from "@/components/list-toolbar";
+import { listPage } from "@/lib/list-page";
+import { rowMatchesQuery } from "@/lib/list-query";
 
 type Country = { id: string; name: string };
 type Institution = { id: string; name: string; countries: Country[] };
 type Standard = { id: string; designation: string; titleEn: string };
+
+function PagedList<T extends object>({
+  rows,
+  fields,
+  placeholder,
+  children,
+}: {
+  rows: T[];
+  fields: string[];
+  placeholder: string;
+  children: (rows: T[], empty: boolean) => React.ReactNode;
+}) {
+  const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const filtered = rows.filter((row) => rowMatchesQuery(row, q, fields));
+  const paged = listPage(String(page), filtered.length);
+  const visible = filtered.slice(paged.skip, paged.skip + paged.take);
+  return (
+    <div className="space-y-3">
+      <ListToolbar
+        value={q}
+        onChange={(next) => {
+          setQ(next);
+          setPage(1);
+        }}
+        onClear={() => {
+          setQ("");
+          setPage(1);
+        }}
+        placeholder={placeholder}
+        from={paged.from}
+        to={paged.to}
+        total={paged.total}
+      />
+      {children(visible, rows.length === 0)}
+      <LinePager page={paged.page} pageCount={paged.pageCount} onPage={setPage} />
+    </div>
+  );
+}
 
 export function LibraryAdminClient(props: {
   canWrite: boolean;
@@ -69,38 +113,31 @@ export function LibraryAdminClient(props: {
     }
   }
 
-  return (
+  const notifyTab = props.canWrite ? (
+    <form className="grid gap-3 rounded-xl border border-[var(--line)] p-4" onSubmit={saveNotifyCc}>
+      <h2 className="text-lg font-semibold">Copy colleagues on standard requests</h2>
+      <p className="text-sm text-[var(--muted)]">
+        These addresses are CC’d together with the requestor when someone asks for particular standards.
+        One email per line.
+      </p>
+      <label className="grid gap-1 text-sm">
+        Colleague emails
+        <textarea
+          value={ccText}
+          onChange={(event) => setCcText(event.target.value)}
+          rows={4}
+          placeholder={"colleague@arso-oran.org\nteam@arso-oran.org"}
+          className="rounded-md border px-3 py-2 font-mono text-sm"
+        />
+      </label>
+      <button className="w-fit rounded-md bg-[var(--ink)] px-4 py-2 text-sm text-white">Save copy list</button>
+    </form>
+  ) : (
+    <p className="text-sm text-[var(--muted)]">You can view this page but not change the colleague copy list.</p>
+  );
+
+  const accessTab = (
     <div className="space-y-10">
-      <div>
-        <h1 className="font-[family-name:var(--font-display)] text-3xl">Library of African Standards</h1>
-        <p className="mt-2 text-sm text-[var(--muted)]">
-          Assign the standards officer role for harmonisation and adoption. A person can hold this role together with product certification and other duties.
-        </p>
-      </div>
-      {error ? <p className="text-sm text-rose-700">{error}</p> : null}
-      {message ? <p className="text-sm text-emerald-800">{message}</p> : null}
-
-      {props.canWrite ? (
-        <form className="grid gap-3 rounded-xl border border-[var(--line)] p-4" onSubmit={saveNotifyCc}>
-          <h2 className="text-lg font-semibold">Copy colleagues on standard requests</h2>
-          <p className="text-sm text-[var(--muted)]">
-            These addresses are CC’d together with the requestor when someone asks for particular standards.
-            One email per line.
-          </p>
-          <label className="grid gap-1 text-sm">
-            Colleague emails
-            <textarea
-              value={ccText}
-              onChange={(event) => setCcText(event.target.value)}
-              rows={4}
-              placeholder={"colleague@arso-oran.org\nteam@arso-oran.org"}
-              className="rounded-md border px-3 py-2 font-mono text-sm"
-            />
-          </label>
-          <button className="w-fit rounded-md bg-[var(--ink)] px-4 py-2 text-sm text-white">Save copy list</button>
-        </form>
-      ) : null}
-
       {props.canWrite ? (
         <form
           className="grid gap-3 rounded-xl border border-[var(--line)] p-4"
@@ -157,101 +194,166 @@ export function LibraryAdminClient(props: {
 
       <section>
         <h2 className="text-lg font-semibold">Role requests</h2>
-        <ul className="mt-3 space-y-2 text-sm">
-          {props.requests.map((row) => (
-            <li key={row.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--line)] px-3 py-2">
-              <span>{row.name} · {row.email} · {row.organization} · {row.country}</span>
-              {props.canWrite ? (
-                <span className="flex gap-2">
-                  <button type="button" className="underline" onClick={() => post(`/api/admin/library/requests/${row.id}`, { decision: "approve" })}>Grant</button>
-                  <button type="button" className="underline" onClick={() => post(`/api/admin/library/requests/${row.id}`, { decision: "reject" })}>Reject</button>
-                </span>
-              ) : null}
-            </li>
-          ))}
-          {props.requests.length === 0 ? <li className="text-[var(--muted)]">No requests waiting.</li> : null}
-        </ul>
+        <div className="mt-3">
+          <PagedList rows={props.requests} fields={["name", "email", "organization", "country"]} placeholder="Search role requests">
+            {(rows, empty) => (
+              <ul className="space-y-2 text-sm">
+                {rows.map((row) => (
+                  <li key={row.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--line)] px-3 py-2">
+                    <span>{row.name} · {row.email} · {row.organization} · {row.country}</span>
+                    {props.canWrite ? (
+                      <span className="flex gap-2">
+                        <button type="button" className="underline" onClick={() => post(`/api/admin/library/requests/${row.id}`, { decision: "approve" })}>Grant</button>
+                        <button type="button" className="underline" onClick={() => post(`/api/admin/library/requests/${row.id}`, { decision: "reject" })}>Reject</button>
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
+                {empty ? <li className="text-[var(--muted)]">No requests waiting.</li> : null}
+                {!empty && rows.length === 0 ? <li className="text-[var(--muted)]">No matching requests.</li> : null}
+              </ul>
+            )}
+          </PagedList>
+        </div>
       </section>
+    </div>
+  );
 
-      <section className="space-y-4">
-        <h2 className="text-lg font-semibold">Standard requests</h2>
-        {props.standardRequests.map((row) => (
-          <form
-            key={row.id}
-            className="rounded-md border border-[var(--line)] p-3 text-sm"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const form = new FormData(event.currentTarget);
-              const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
-              post("/api/admin/library/releases", {
-                requestId: row.id,
-                decision: submitter?.value || "send",
-                email: row.email,
-                name: row.name,
-                organizationId: row.organizationId,
-                memberStateId: row.memberStateId,
-                standardIds: form.getAll("standardIds"),
-              });
-            }}
-          >
-            <p>{row.name} · {row.email} · {row.organization} · {row.country}</p>
-            {row.note ? <p className="text-[var(--muted)]">{row.note}</p> : null}
-            <ul className="mt-2 space-y-1">
-              {row.items.map((item) => (
-                <li key={item.id} className="flex flex-wrap items-center gap-2">
-                  <span>{item.label}</span>
-                  {item.title ? <span className="text-[var(--muted)]">{item.title}</span> : null}
-                  {item.notListed ? <span className="rounded-full border px-2 py-0.5 text-xs">[not listed]</span> : null}
-                  {item.noText ? <span className="rounded-full border px-2 py-0.5 text-xs">[no text]</span> : null}
+  const standardRequestsTab = (
+    <section className="space-y-4">
+      <h2 className="text-lg font-semibold">Standard requests</h2>
+      <PagedList
+        rows={props.standardRequests.map((row) => ({ ...row, itemText: row.items.map((item) => `${item.label} ${item.title}`).join(" ") }))}
+        fields={["name", "email", "organization", "country", "note", "itemText"]}
+        placeholder="Search standard requests"
+      >
+        {(rows, empty) => (
+          <div className="space-y-4">
+            {rows.map((row) => (
+              <form
+                key={row.id}
+                className="rounded-md border border-[var(--line)] p-3 text-sm"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  const form = new FormData(event.currentTarget);
+                  const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+                  post("/api/admin/library/releases", {
+                    requestId: row.id,
+                    decision: submitter?.value || "send",
+                    email: row.email,
+                    name: row.name,
+                    organizationId: row.organizationId,
+                    memberStateId: row.memberStateId,
+                    standardIds: form.getAll("standardIds"),
+                  });
+                }}
+              >
+                <p>{row.name} · {row.email} · {row.organization} · {row.country}</p>
+                {row.note ? <p className="text-[var(--muted)]">{row.note}</p> : null}
+                <ul className="mt-2 space-y-1">
+                  {row.items.map((item) => (
+                    <li key={item.id} className="flex flex-wrap items-center gap-2">
+                      <span>{item.label}</span>
+                      {item.title ? <span className="text-[var(--muted)]">{item.title}</span> : null}
+                      {item.notListed ? <span className="rounded-full border px-2 py-0.5 text-xs">[not listed]</span> : null}
+                      {item.noText ? <span className="rounded-full border px-2 py-0.5 text-xs">[no text]</span> : null}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-xs text-[var(--muted)]">Select the catalogue standards to email. Items that are not listed cannot be released from here.</p>
+                <div className="mt-1 grid max-h-48 gap-1 overflow-auto">
+                  {props.standards.map((standard) => (
+                    <label key={standard.id} className="flex gap-2">
+                      <input type="checkbox" name="standardIds" value={standard.id} defaultChecked={row.standardIds.includes(standard.id)} />
+                      <span>{standard.designation}</span>
+                    </label>
+                  ))}
+                </div>
+                {props.canWrite ? (
+                  <div className="mt-2 flex gap-2">
+                    <button value="send" className="rounded-md bg-[var(--ink)] px-3 py-1 text-white">Email the selected standards</button>
+                    <button value="reject" className="rounded-md border px-3 py-1">Reject</button>
+                  </div>
+                ) : null}
+              </form>
+            ))}
+            {empty ? <p className="text-sm text-[var(--muted)]">No standard requests waiting.</p> : null}
+            {!empty && rows.length === 0 ? <p className="text-sm text-[var(--muted)]">No matching standard requests.</p> : null}
+          </div>
+        )}
+      </PagedList>
+    </section>
+  );
+
+  const activityTab = (
+    <section>
+      <h2 className="text-lg font-semibold">Activity</h2>
+      <form className="mt-3 flex flex-wrap gap-2" method="get">
+        <input name="person" defaultValue={props.filters.person || ""} placeholder="Person" className="rounded-md border px-3 py-2 text-sm" />
+        <input name="role" defaultValue={props.filters.role || ""} placeholder="Role code" className="rounded-md border px-3 py-2 text-sm" />
+        <input name="action" defaultValue={props.filters.action || ""} placeholder="Action" className="rounded-md border px-3 py-2 text-sm" />
+        <button className="rounded-md border px-3 py-2 text-sm">Filter</button>
+      </form>
+      <div className="mt-3">
+        <PagedList
+          rows={props.activity}
+          fields={["at", "person", "role", "action", "organization", "standard", "language", "posting"]}
+          placeholder="Search activity"
+        >
+          {(rows, empty) => (
+            <ul className="space-y-2 text-sm">
+              {rows.map((row) => (
+                <li key={row.id} className="rounded-md border border-[var(--line)] px-3 py-2">
+                  {row.at.slice(0, 16).replace("T", " ")} · {row.person} · {row.role} · {row.action}
+                  {row.organization ? ` · ${row.organization}` : ""}
+                  {row.standard ? ` · ${row.standard}` : ""}
+                  {row.language ? ` · ${row.language}` : ""}
+                  {row.posting ? ` · ${row.posting}` : ""}
                 </li>
               ))}
+              {empty ? <li className="text-[var(--muted)]">No activity.</li> : null}
+              {!empty && rows.length === 0 ? <li className="text-[var(--muted)]">No matching activity.</li> : null}
             </ul>
-            <p className="mt-2 text-xs text-[var(--muted)]">Select the catalogue standards to email. Items that are not listed cannot be released from here.</p>
-            <div className="mt-1 grid max-h-48 gap-1 overflow-auto">
-              {props.standards.map((standard) => (
-                <label key={standard.id} className="flex gap-2">
-                  <input type="checkbox" name="standardIds" value={standard.id} defaultChecked={row.standardIds.includes(standard.id)} />
-                  <span>{standard.designation}</span>
-                </label>
+          )}
+        </PagedList>
+      </div>
+      <h3 className="mt-6 font-medium">Audit events for this person</h3>
+      <div className="mt-2">
+        <PagedList rows={props.audits} fields={["at", "person", "action"]} placeholder="Search audit events">
+          {(rows, empty) => (
+            <ul className="space-y-2 text-sm">
+              {rows.map((row) => (
+                <li key={row.id}>{row.at.slice(0, 16).replace("T", " ")} · {row.person} · {row.action}</li>
               ))}
-            </div>
-            {props.canWrite ? (
-              <div className="mt-2 flex gap-2">
-                <button value="send" className="rounded-md bg-[var(--ink)] px-3 py-1 text-white">Email the selected standards</button>
-                <button value="reject" className="rounded-md border px-3 py-1">Reject</button>
-              </div>
-            ) : null}
-          </form>
-        ))}
-        {props.standardRequests.length === 0 ? <p className="text-sm text-[var(--muted)]">No standard requests waiting.</p> : null}
-      </section>
+              {empty ? <li className="text-[var(--muted)]">No audit events.</li> : null}
+              {!empty && rows.length === 0 ? <li className="text-[var(--muted)]">No matching audit events.</li> : null}
+            </ul>
+          )}
+        </PagedList>
+      </div>
+    </section>
+  );
 
-      <section>
-        <h2 className="text-lg font-semibold">Activity</h2>
-        <form className="mt-3 flex flex-wrap gap-2" method="get">
-          <input name="person" defaultValue={props.filters.person || ""} placeholder="Person" className="rounded-md border px-3 py-2 text-sm" />
-          <input name="role" defaultValue={props.filters.role || ""} placeholder="Role code" className="rounded-md border px-3 py-2 text-sm" />
-          <input name="action" defaultValue={props.filters.action || ""} placeholder="Action" className="rounded-md border px-3 py-2 text-sm" />
-          <button className="rounded-md border px-3 py-2 text-sm">Filter</button>
-        </form>
-        <ul className="mt-3 space-y-2 text-sm">
-          {props.activity.map((row) => (
-            <li key={row.id} className="rounded-md border border-[var(--line)] px-3 py-2">
-              {row.at.slice(0, 16).replace("T", " ")} · {row.person} · {row.role} · {row.action}
-              {row.organization ? ` · ${row.organization}` : ""}
-              {row.standard ? ` · ${row.standard}` : ""}
-              {row.language ? ` · ${row.language}` : ""}
-              {row.posting ? ` · ${row.posting}` : ""}
-            </li>
-          ))}
-        </ul>
-        <h3 className="mt-6 font-medium">Audit events for this person</h3>
-        <ul className="mt-2 space-y-2 text-sm">
-          {props.audits.map((row) => (
-            <li key={row.id}>{row.at.slice(0, 16).replace("T", " ")} · {row.person} · {row.action}</li>
-          ))}
-        </ul>
-      </section>
+  return (
+    <div className="space-y-10">
+      <div>
+        <h1 className="font-[family-name:var(--font-display)] text-3xl">Library of African Standards</h1>
+        <p className="mt-2 text-sm text-[var(--muted)]">
+          Assign the standards officer role for harmonisation and adoption. A person can hold this role together with product certification and other duties.
+        </p>
+      </div>
+      {error ? <p className="text-sm text-rose-700">{error}</p> : null}
+      {message ? <p className="text-sm text-emerald-800">{message}</p> : null}
+
+      <DeskTabs
+        keepMounted
+        tabs={[
+          { id: "notify", label: "Notify CC", content: notifyTab },
+          { id: "access", label: "Access", content: accessTab },
+          { id: "standard-requests", label: "Standard requests", content: standardRequestsTab },
+          { id: "activity", label: "Activity", content: activityTab },
+        ]}
+      />
     </div>
   );
 }
