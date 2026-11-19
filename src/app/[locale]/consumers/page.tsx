@@ -5,21 +5,36 @@ import { isLocale, t, type Locale } from "@/lib/i18n";
 import { CrudForm } from "@/components/admin/crud-form";
 import { LinePager } from "@/components/line-pager";
 import { listHref, listPage } from "@/lib/list-page";
+import { normalizeListQuery } from "@/lib/list-query";
+import { UrlListSearch } from "@/components/admin/url-list-search";
+import { withBasePath } from "@/lib/base-path";
 
 export default async function ConsumersPage({
   params,
   searchParams,
 }: {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ page?: string; q?: string }>;
 }) {
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
   const locale = raw as Locale;
-  const total = await prisma.consumerComplaint.count();
-  const listing = listPage((await searchParams).page, total);
+  const sp = await searchParams;
+  const q = normalizeListQuery(sp.q);
+  const where = q
+    ? {
+        OR: [
+          { subject: { contains: q, mode: "insensitive" as const } },
+          { status: { contains: q, mode: "insensitive" as const } },
+        ],
+      }
+    : {};
+  const listPath = `/${locale}/consumers`;
+  const total = await prisma.consumerComplaint.count({ where });
+  const listing = listPage(sp.page, total);
 
   const complaints = await prisma.consumerComplaint.findMany({
+    where,
     orderBy: { createdAt: "desc" },
     skip: listing.skip,
     take: listing.take,
@@ -43,7 +58,7 @@ export default async function ConsumersPage({
 
       <CrudForm
         idPrefix="complaint-"
-        action="/api/chain/complaints"
+        action={withBasePath("/api/chain/complaints")}
         submitLabel="Submit complaint"
         fields={[
           { name: "complainantEmail", label: "Your email", required: true, placeholder: "name@example.com" },
@@ -53,6 +68,14 @@ export default async function ConsumersPage({
         ]}
       />
 
+      <UrlListSearch
+        pathname={listPath}
+        initial={q}
+        placeholder="Search subject or status"
+        from={listing.from}
+        to={listing.to}
+        total={listing.total}
+      />
       <div className="panel overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead>
@@ -65,7 +88,7 @@ export default async function ConsumersPage({
             {complaints.length === 0 && (
               <tr>
                 <td colSpan={2} className="px-4 py-8 text-center text-[var(--muted)]">
-                  No complaints filed yet.
+                  {q ? "No complaints match this search." : "No complaints filed yet."}
                 </td>
               </tr>
             )}
@@ -81,8 +104,8 @@ export default async function ConsumersPage({
       <LinePager
         page={listing.page}
         pageCount={listing.pageCount}
-        prevHref={listHref(`/${locale}/consumers`, listing.page - 1)}
-        nextHref={listHref(`/${locale}/consumers`, listing.page + 1)}
+        prevHref={listHref(listPath, listing.page - 1, { q })}
+        nextHref={listHref(listPath, listing.page + 1, { q })}
       />
     </div>
   );

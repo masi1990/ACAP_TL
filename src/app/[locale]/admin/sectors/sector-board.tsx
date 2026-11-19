@@ -5,6 +5,11 @@ import { CrudForm, DeleteButton } from "@/components/admin/crud-form";
 import { CountryMark } from "@/components/country-mark";
 import type { Locale } from "@/lib/i18n";
 import { STANDARD_KINDS, standardKindLabel } from "@/lib/standard-kinds";
+import { withBasePath } from "@/lib/base-path";
+import { ListToolbar } from "@/components/list-toolbar";
+import { LinePager } from "@/components/line-pager";
+import { listPage } from "@/lib/list-page";
+import { rowMatchesQuery } from "@/lib/list-query";
 
 export type SectorBoardCommittee = {
   id: string;
@@ -25,6 +30,19 @@ export type SectorBoardSector = {
 };
 
 const SECTOR_COLORS = ["#0f2a24", "#1f6b54", "#0e4d6c", "#8a5a22", "#6a3d5c", "#3e5a2f", "#1e3a5f", "#7a3b2e"];
+
+const SECTOR_FIELDS = ["code", "name"];
+const COMMITTEE_FIELDS = ["code", "name", "scope"];
+
+/** A sector that matches the search shows all its committees; otherwise only matching committees remain. */
+function filterSectors(sectors: SectorBoardSector[], q: string): SectorBoardSector[] {
+  if (!q.trim()) return sectors;
+  return sectors.flatMap((sector) => {
+    if (rowMatchesQuery(sector, q, SECTOR_FIELDS)) return [sector];
+    const committees = sector.committees.filter((committee) => rowMatchesQuery(committee, q, COMMITTEE_FIELDS));
+    return committees.length ? [{ ...sector, committees }] : [];
+  });
+}
 
 function kindRank(kind: string) {
   const index = STANDARD_KINDS.findIndex((item) => item.value === kind);
@@ -47,12 +65,27 @@ export function SectorBoard({
   const [view, setView] = useState<"sectors" | "analysis">("sectors");
   const [openSectorId, setOpenSectorId] = useState("");
   const [openCommitteeId, setOpenCommitteeId] = useState("");
+  const [q, setQ] = useState("");
+  const [committeePage, setCommitteePage] = useState(1);
+  const [analysisPage, setAnalysisPage] = useState(1);
   const countryOptions = countries.map((country) => ({
     value: country.id,
     label: `${country.name} (${country.iso2})`,
   }));
   const sectorOptions = sectors.map((sector) => ({ value: sector.id, label: `${sector.code} — ${sector.name}` }));
-  const openSector = sectors.find((sector) => sector.id === openSectorId) || null;
+  const visibleSectors = filterSectors(sectors, q);
+  const openSector = visibleSectors.find((sector) => sector.id === openSectorId) || null;
+  const committeeListing = listPage(String(committeePage), openSector?.committees.length ?? 0);
+  const committeePageRows = openSector
+    ? openSector.committees.slice(committeeListing.skip, committeeListing.skip + committeeListing.take)
+    : [];
+  const sectorListing = listPage(String(analysisPage), visibleSectors.length);
+
+  function changeQuery(next: string) {
+    setQ(next);
+    setCommitteePage(1);
+    setAnalysisPage(1);
+  }
 
   const categoryTotals = new Map<string, number>();
   for (const sector of sectors) {
@@ -118,8 +151,26 @@ export function SectorBoard({
         </button>
       </div>
 
+      <ListToolbar
+        value={q}
+        onChange={changeQuery}
+        onClear={() => changeQuery("")}
+        placeholder="Search sector or committee"
+        from={view === "analysis" ? sectorListing.from : undefined}
+        to={view === "analysis" ? sectorListing.to : undefined}
+        total={view === "analysis" ? sectorListing.total : visibleSectors.length}
+      />
+
       {view === "analysis" ? (
-        <Analysis sectors={sectors} locale={locale} categoryTotals={categoryTotals} />
+        <>
+          <Analysis
+            sectors={visibleSectors.slice(sectorListing.skip, sectorListing.skip + sectorListing.take)}
+            allSectors={sectors}
+            locale={locale}
+            categoryTotals={categoryTotals}
+          />
+          <LinePager page={sectorListing.page} pageCount={sectorListing.pageCount} onPage={setAnalysisPage} />
+        </>
       ) : (
         <div className="space-y-6">
           {canWrite ? (
@@ -127,7 +178,7 @@ export function SectorBoard({
               <div className="space-y-2">
                 <h3 className="text-sm font-semibold">Add sector</h3>
                 <CrudForm
-                  action="/api/admin/sectors"
+                  action={withBasePath("/api/admin/sectors")}
                   submitLabel="Add sector"
                   fields={[
                     { name: "code", label: "Sector code", required: true, placeholder: "FOOD" },
@@ -138,7 +189,7 @@ export function SectorBoard({
               <div className="space-y-2">
                 <h3 className="text-sm font-semibold">Add technical committee</h3>
                 <CrudForm
-                  action="/api/admin/committees"
+                  action={withBasePath("/api/admin/committees")}
                   submitLabel="Add committee"
                   fields={committeeFields()}
                 />
@@ -147,8 +198,8 @@ export function SectorBoard({
           ) : null}
 
           <div className="flex flex-wrap gap-2" role="tablist" aria-label="Sectors">
-            {sectors.map((sector, index) => {
-              const color = SECTOR_COLORS[index % SECTOR_COLORS.length];
+            {visibleSectors.map((sector) => {
+              const color = SECTOR_COLORS[sectors.findIndex((item) => item.id === sector.id) % SECTOR_COLORS.length];
               const active = openSectorId === sector.id;
               return (
                 <button
@@ -160,6 +211,7 @@ export function SectorBoard({
                   onClick={() => {
                     setOpenSectorId(active ? "" : sector.id);
                     setOpenCommitteeId("");
+                    setCommitteePage(1);
                   }}
                 >
                   {sector.code} {sector.name}
@@ -171,7 +223,11 @@ export function SectorBoard({
 
           {!openSector ? (
             <p className="rounded-xl border border-dashed border-[var(--line)] px-4 py-8 text-center text-sm text-[var(--muted)]">
-              {sectors.length ? "Choose a sector to see its technical committees." : "No sectors yet. Add a sector, then add its technical committees."}
+              {sectors.length === 0
+                ? "No sectors yet. Add a sector, then add its technical committees."
+                : visibleSectors.length === 0
+                  ? "No sectors or committees match this search."
+                  : "Choose a sector to see its technical committees."}
             </p>
           ) : (
             <section className="overflow-hidden rounded-2xl border border-[var(--line)] bg-white">
@@ -188,7 +244,7 @@ export function SectorBoard({
               <div className="grid gap-3 p-4">
                 {canWrite ? (
                   <CrudForm
-                    action={`/api/admin/sectors/${openSector.id}`}
+                    action={withBasePath(`/api/admin/sectors/${openSector.id}`)}
                     method="PATCH"
                     idPrefix={`${openSector.id}-`}
                     submitLabel="Save sector"
@@ -198,11 +254,11 @@ export function SectorBoard({
                     ]}
                   />
                 ) : null}
-                {canDelete ? <DeleteButton action={`/api/admin/sectors/${openSector.id}`} /> : null}
+                {canDelete ? <DeleteButton action={withBasePath(`/api/admin/sectors/${openSector.id}`)} /> : null}
                 {openSector.committees.length === 0 ? (
                   <p className="text-sm text-[var(--muted)]">This sector has no technical committees yet.</p>
                 ) : (
-                  openSector.committees.map((committee) => {
+                  committeePageRows.map((committee) => {
                     const open = openCommitteeId === committee.id;
                     return (
                       <article key={committee.id} className="rounded-xl border border-[#245c74]/40 bg-[#f4fafb]">
@@ -241,20 +297,25 @@ export function SectorBoard({
                             </p>
                             {canWrite ? (
                               <CrudForm
-                                action={`/api/admin/committees/${committee.id}`}
+                                action={withBasePath(`/api/admin/committees/${committee.id}`)}
                                 method="PATCH"
                                 idPrefix={`${committee.id}-`}
                                 submitLabel="Save committee"
                                 fields={committeeFields(committee)}
                               />
                             ) : null}
-                            {canDelete ? <DeleteButton action={`/api/admin/committees/${committee.id}`} /> : null}
+                            {canDelete ? <DeleteButton action={withBasePath(`/api/admin/committees/${committee.id}`)} /> : null}
                           </div>
                         ) : null}
                       </article>
                     );
                   })
                 )}
+                <LinePager
+                  page={committeeListing.page}
+                  pageCount={committeeListing.pageCount}
+                  onPage={setCommitteePage}
+                />
               </div>
             </section>
           )}
@@ -266,23 +327,27 @@ export function SectorBoard({
 
 function Analysis({
   sectors,
+  allSectors,
   locale,
   categoryTotals,
 }: {
+  /** The sectors on the current page. */
   sectors: SectorBoardSector[];
+  /** Every sector, used for totals and stable colours. */
+  allSectors: SectorBoardSector[];
   locale: Locale;
   categoryTotals: Map<string, number>;
 }) {
   const kinds = [...categoryTotals.entries()].sort((a, b) => kindRank(a[0]) - kindRank(b[0]) || a[0].localeCompare(b[0]));
-  const tcTotal = sectors.reduce((sum, sector) => sum + sector.committees.length, 0);
-  const standardTotal = sectors.reduce(
+  const tcTotal = allSectors.reduce((sum, sector) => sum + sector.committees.length, 0);
+  const standardTotal = allSectors.reduce(
     (sum, sector) => sum + sector.committees.reduce((inner, committee) => inner + committee.standardCount, 0),
     0,
   );
   return (
     <div className="grid gap-6">
       <div className="grid gap-3 sm:grid-cols-3">
-        <Stat label="Sectors" value={sectors.length} color="#0f2a24" />
+        <Stat label="Sectors" value={allSectors.length} color="#0f2a24" />
         <Stat label="Technical committees" value={tcTotal} color="#245c74" />
         <Stat label="Standards" value={standardTotal} color="#1f6b54" />
       </div>
@@ -298,8 +363,9 @@ function Analysis({
         </div>
       </section>
       <div className="grid gap-4">
-        {sectors.map((sector, index) => {
-          const color = SECTOR_COLORS[index % SECTOR_COLORS.length];
+        {sectors.length === 0 ? <p className="text-sm text-[var(--muted)]">No sectors or committees match this search.</p> : null}
+        {sectors.map((sector) => {
+          const color = SECTOR_COLORS[allSectors.findIndex((item) => item.id === sector.id) % SECTOR_COLORS.length];
           const standards = sector.committees.reduce((sum, committee) => sum + committee.standardCount, 0);
           return (
             <section key={sector.id} className="overflow-hidden rounded-2xl border bg-white" style={{ borderColor: color }}>

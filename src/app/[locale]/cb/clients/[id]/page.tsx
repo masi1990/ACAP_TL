@@ -12,11 +12,18 @@ import { productFormFields } from "@/lib/product-form";
 import { CrudForm, DeleteButton } from "@/components/admin/crud-form";
 import { CertificateDownloadLink } from "@/components/certificate-actions";
 import { ClientRedirect } from "@/components/admin/client-redirect";
+import { withBasePath } from "@/lib/base-path";
+import { LinePager } from "@/components/line-pager";
+import { UrlListSearch } from "@/components/admin/url-list-search";
+import { listHref, listPage } from "@/lib/list-page";
+import { normalizeListQuery, rowMatchesQuery } from "@/lib/list-query";
 
 export default async function ClientProductsPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ locale: string; id: string }>;
+  searchParams: Promise<{ q?: string; page?: string }>;
 }) {
   const { locale: raw, id } = await params;
   if (!isLocale(raw)) notFound();
@@ -83,6 +90,43 @@ export default async function ClientProductsPage({
     }),
   ]);
   const importedGroups = groupImportedMarks(importedMarks);
+  const sp = await searchParams;
+  const q = normalizeListQuery(sp.q);
+  const listPath = `/${locale}/cb/clients/${client.id}`;
+  type ProductRow = (typeof products)[number];
+  type ImportedRow = (typeof importedGroups)[number];
+  const tableRows: Array<
+    | { key: string; search: Record<string, string>; product: ProductRow; marks?: undefined }
+    | { key: string; search: Record<string, string>; marks: ImportedRow; product?: undefined }
+  > = [
+    ...products.map((product) => ({
+      key: product.id,
+      search: {
+        name: product.name,
+        commodity: product.commodity,
+        standards: product.standardLinks.map((link) => link.standardVersion.standard.designation).join(" "),
+        certificates: product.applications.flatMap((row) => (row.coc ? [row.coc.certificateNo] : [])).join(" "),
+      },
+      product,
+    })),
+    ...importedGroups.map((marks) => ({
+      key: marks[0].liveProductId,
+      search: {
+        name: marks[0].productName,
+        commodity: marks[0].brand || "",
+        standards: marks
+          .map((mark) => mark.standardVersion?.standard.designation || mark.sourceStandardText || "")
+          .join(" "),
+        certificates: marks.map((mark) => `${mark.certificationId} ${mark.pinText}`).join(" "),
+      },
+      marks,
+    })),
+  ];
+  const matched = tableRows.filter((row) =>
+    rowMatchesQuery(row.search, q, ["name", "commodity", "standards", "certificates"]),
+  );
+  const listing = listPage(sp.page, matched.length);
+  const pageRows = matched.slice(listing.skip, listing.skip + listing.take);
   const countries = countryOptions();
   const pickBody = hub || cbIds.length > 1;
   const country = client.clientAccounts.flatMap((account) => account.companies)[0]?.countryIso2 || "";
@@ -104,12 +148,12 @@ export default async function ClientProductsPage({
       {serves && can(user, "clients:write") && (
         <div className="space-y-3">
           <div className="flex justify-end">
-            <DeleteButton action={`/api/cb/client/${client.id}`} label="Delete manufacturer or importer" />
+            <DeleteButton action={withBasePath(`/api/cb/client/${client.id}`)} label="Delete manufacturer or importer" />
           </div>
           <CrudForm
             idPrefix="client-"
             method="PATCH"
-            action={`/api/cb/client/${client.id}`}
+            action={withBasePath(`/api/cb/client/${client.id}`)}
             submitLabel="Save manufacturer or importer"
             fields={[
               { name: "name", label: "Manufacturer or importer", required: true, defaultValue: client.name },
@@ -152,7 +196,7 @@ export default async function ClientProductsPage({
       {serves && can(user, "products:write") && client.status === "ACTIVE" && versions.length > 0 && (
         <CrudForm
           idPrefix="product-"
-          action="/api/cb/products"
+          action={withBasePath("/api/cb/products")}
           submitLabel="Add product"
           fields={productFormFields({
             organizationId: client.id,
@@ -169,6 +213,14 @@ export default async function ClientProductsPage({
         />
       )}
 
+      <UrlListSearch
+        pathname={listPath}
+        initial={q}
+        placeholder="Search product, standard, or certificate"
+        from={listing.from}
+        to={listing.to}
+        total={listing.total}
+      />
       <div className="panel overflow-x-auto">
         <table className="w-full min-w-[640px] text-left text-sm">
           <thead>
@@ -180,14 +232,45 @@ export default async function ClientProductsPage({
             </tr>
           </thead>
           <tbody>
-            {products.length === 0 && importedGroups.length === 0 && (
+            {pageRows.length === 0 && (
               <tr>
                 <td className="px-4 py-6 text-[var(--muted)]" colSpan={4}>
-                  No products certified for this client yet.
+                  {q ? "No products match this search." : "No products certified for this client yet."}
                 </td>
               </tr>
             )}
-            {products.map((product) => {
+            {pageRows.map((row) => {
+              if (!row.product) {
+                const marks = row.marks;
+                const primary = marks[0];
+                return (
+                  <tr key={`imported-${row.key}`} className="border-b border-[var(--line)]">
+                    <td className="px-4 py-3">
+                      <div className="font-medium">{primary.productName}</div>
+                      <div className="text-xs text-[var(--muted)]">{primary.brand || "Copied certified product"}</div>
+                    </td>
+                    <td className="px-4 py-3">
+                      {marks.map((mark) => (
+                        <div key={mark.id}>
+                          {mark.markType === "eco" ? "Eco" : "Quality"} ·{" "}
+                          {mark.standardVersion?.standard.designation || mark.sourceStandardText || "Standard not linked"}
+                        </div>
+                      ))}
+                    </td>
+                    <td className="px-4 py-3">{primary.country || "—"}</td>
+                    <td className="px-4 py-3">
+                      {marks.map((mark) => (
+                        <div key={mark.id}>
+                          <Link className="text-[var(--accent)] underline" href={`/${locale}/verify?pin=${encodeURIComponent(mark.pinText)}`}>
+                            {mark.markType === "eco" ? "Eco" : "Quality"} · {mark.certificationId}
+                          </Link>
+                        </div>
+                      ))}
+                    </td>
+                  </tr>
+                );
+              }
+              const product = row.product;
               const links = [...product.standardLinks].sort(
                 (a, b) => Number(a.markScheme === "ECO") - Number(b.markScheme === "ECO"),
               );
@@ -225,38 +308,15 @@ export default async function ClientProductsPage({
                 </tr>
               );
             })}
-            {importedGroups.map((marks) => {
-              const primary = marks[0];
-              return (
-                <tr key={primary.liveProductId} className="border-b border-[var(--line)]">
-                  <td className="px-4 py-3">
-                    <div className="font-medium">{primary.productName}</div>
-                    <div className="text-xs text-[var(--muted)]">{primary.brand || "Copied certified product"}</div>
-                  </td>
-                  <td className="px-4 py-3">
-                    {marks.map((mark) => (
-                      <div key={mark.id}>
-                        {mark.markType === "eco" ? "Eco" : "Quality"} ·{" "}
-                        {mark.standardVersion?.standard.designation || mark.sourceStandardText || "Standard not linked"}
-                      </div>
-                    ))}
-                  </td>
-                  <td className="px-4 py-3">{primary.country || "—"}</td>
-                  <td className="px-4 py-3">
-                    {marks.map((mark) => (
-                      <div key={mark.id}>
-                        <Link className="text-[var(--accent)] underline" href={`/${locale}/verify?pin=${encodeURIComponent(mark.pinText)}`}>
-                          {mark.markType === "eco" ? "Eco" : "Quality"} · {mark.certificationId}
-                        </Link>
-                      </div>
-                    ))}
-                  </td>
-                </tr>
-              );
-            })}
           </tbody>
         </table>
       </div>
+      <LinePager
+        page={listing.page}
+        pageCount={listing.pageCount}
+        prevHref={listHref(listPath, listing.page - 1, { q })}
+        nextHref={listHref(listPath, listing.page + 1, { q })}
+      />
     </main>
   );
 }

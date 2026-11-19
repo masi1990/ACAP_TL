@@ -6,8 +6,19 @@ import { isLocale, type Locale } from "@/lib/i18n";
 import { CrudForm, DeleteButton } from "@/components/admin/crud-form";
 import { ClientRedirect } from "@/components/admin/client-redirect";
 import { Badge } from "@/components/ui/badge";
+import { withBasePath } from "@/lib/base-path";
+import { LinePager } from "@/components/line-pager";
+import { listHref, listPage } from "@/lib/list-page";
+import { normalizeListQuery } from "@/lib/list-query";
+import { UrlListSearch } from "@/components/admin/url-list-search";
 
-export default async function AdminRecsPage({ params }: { params: Promise<{ locale: string }> }) {
+export default async function AdminRecsPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ locale: string }>;
+  searchParams: Promise<{ page?: string; q?: string }>;
+}) {
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
   const locale = raw as Locale;
@@ -15,7 +26,23 @@ export default async function AdminRecsPage({ params }: { params: Promise<{ loca
   if (!session) return <ClientRedirect href={`/${locale}/login?next=/${locale}/admin/recs`} />;
   if (!can(session.user, "recs:read")) notFound();
 
+  const sp = await searchParams;
+  const q = normalizeListQuery(sp.q);
+  const where = q
+    ? {
+        OR: [
+          { code: { contains: q, mode: "insensitive" as const } },
+          { name: { contains: q, mode: "insensitive" as const } },
+        ],
+      }
+    : {};
+  const listPath = `/${locale}/admin/recs`;
+  const total = await prisma.rec.count({ where });
+  const listing = listPage(sp.page, total);
   const rows = await prisma.rec.findMany({
+    where,
+    skip: listing.skip,
+    take: listing.take,
     include: { _count: { select: { tariffLines: true } } },
     orderBy: { code: "asc" },
   });
@@ -33,7 +60,7 @@ export default async function AdminRecsPage({ params }: { params: Promise<{ loca
 
       {canWrite && (
         <CrudForm
-          action="/api/admin/recs"
+          action={withBasePath("/api/admin/recs")}
           submitLabel="Add REC"
           fields={[
             { name: "code", label: "REC code", required: true, placeholder: "EAC" },
@@ -42,6 +69,14 @@ export default async function AdminRecsPage({ params }: { params: Promise<{ loca
         />
       )}
 
+      <UrlListSearch
+        pathname={listPath}
+        initial={q}
+        placeholder="Search code or name"
+        from={listing.from}
+        to={listing.to}
+        total={listing.total}
+      />
       <div className="panel overflow-hidden">
         <table className="w-full text-left text-sm">
           <thead>
@@ -56,7 +91,7 @@ export default async function AdminRecsPage({ params }: { params: Promise<{ loca
             {rows.length === 0 && (
               <tr>
                 <td colSpan={4} className="px-4 py-8 text-center text-[var(--muted)]">
-                  No RECs yet — add one to begin tariff mapping.
+                  {q ? "No RECs match this search." : "No RECs yet — add one to begin tariff mapping."}
                 </td>
               </tr>
             )}
@@ -68,13 +103,19 @@ export default async function AdminRecsPage({ params }: { params: Promise<{ loca
                   <Badge>{r._count.tariffLines}</Badge>
                 </td>
                 <td className="px-4 py-3 text-right">
-                  {canDelete && <DeleteButton action={`/api/admin/recs/${r.id}`} />}
+                  {canDelete && <DeleteButton action={withBasePath(`/api/admin/recs/${r.id}`)} />}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+      <LinePager
+        page={listing.page}
+        pageCount={listing.pageCount}
+        prevHref={listHref(listPath, listing.page - 1, { q })}
+        nextHref={listHref(listPath, listing.page + 1, { q })}
+      />
       <p className="text-xs text-[var(--muted)]">Locale context: /{locale}/admin/recs</p>
     </div>
   );

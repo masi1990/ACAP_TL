@@ -3,6 +3,7 @@
  * A product is certified against a standard (via CertificationApplication → CoC).
  * Standards may map to many tariff lines (StandardTariffMap).
  */
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { countryByIso2, countriesGroupedByRegion } from "@/lib/africa-regions";
 import { importedRegistryRows } from "@/lib/imported-marks";
@@ -89,10 +90,40 @@ export async function listCertifiedProducts(opts: {
   const country = opts.country?.toUpperCase();
   const rec = opts.rec?.toUpperCase();
 
+  // Narrow the certificate load in the database. Filters are applied at product level (some certificate of the
+  // product matches) so a product keeps all of its certificates; the in-memory filters below stay authoritative.
+  const regionIso2 = opts.region
+    ? countriesGroupedByRegion()
+        .find((group) => group.id === opts.region!.toUpperCase())
+        ?.countries.map((item) => item.iso2.toUpperCase()) ?? []
+    : null;
+  const companyFilter: Prisma.ProductWhereInput =
+    country || regionIso2
+      ? {
+          company: {
+            countryIso2: {
+              ...(country ? { equals: country } : {}),
+              ...(regionIso2 ? { in: regionIso2 } : {}),
+            },
+          },
+        }
+      : {};
+  const applicationConditions: Prisma.CertificationApplicationWhereInput[] = [
+    ...(status ? [{ coc: { is: { status } } }] : []),
+    ...(opts.standardVersionId ? [{ standardVersionId: opts.standardVersionId, coc: { isNot: null } }] : []),
+    ...(opts.designation
+      ? [{ standardVersion: { standard: { designation: opts.designation } }, coc: { isNot: null } }]
+      : []),
+  ];
+  const productFilter: Prisma.ProductWhereInput = {
+    ...companyFilter,
+    ...(applicationConditions.length
+      ? { AND: applicationConditions.map((condition) => ({ applications: { some: condition } })) }
+      : {}),
+  };
+
   const cocs = await prisma.coC.findMany({
-    where: {
-      ...(country ? { application: { product: { company: { countryIso2: country } } } } : {}),
-    },
+    where: { application: { product: productFilter } },
     include: {
       markGrants: true,
       pins: { take: 1, orderBy: { issuedAt: "desc" } },

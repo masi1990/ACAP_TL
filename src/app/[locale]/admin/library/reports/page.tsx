@@ -5,8 +5,20 @@ import { can } from "@/lib/rbac";
 import { isLocale, type Locale } from "@/lib/i18n";
 import { standardVersionHasText } from "@/lib/library-text";
 import { ClientRedirect } from "@/components/admin/client-redirect";
+import { LinePager } from "@/components/line-pager";
+import { UrlListSearch } from "@/components/admin/url-list-search";
+import { listHref, listPage } from "@/lib/list-page";
+import { normalizeListQuery, rowMatchesQuery } from "@/lib/list-query";
 
-export default async function AdminLibraryReportsPage({ params }: { params: Promise<{ locale: string }> }) {
+const SEARCH_FIELDS = ["designation", "title", "sector", "tc"];
+
+export default async function AdminLibraryReportsPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ locale: string }>;
+  searchParams: Promise<{ q?: string; page?: string; rq?: string; rpage?: string }>;
+}) {
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
   const locale = raw as Locale;
@@ -31,8 +43,22 @@ export default async function AdminLibraryReportsPage({ params }: { params: Prom
     orderBy: { designation: "asc" },
   });
 
-  const noText = published.filter((s) => !standardVersionHasText(s.versions[0] || {}));
-  const noTextRequested = noText
+  const sp = await searchParams;
+  const q = normalizeListQuery(sp.q);
+  const rq = normalizeListQuery(sp.rq);
+  const listPath = `/${locale}/admin/library/reports`;
+  const flat = (s: (typeof published)[number]) => ({
+    designation: s.designation,
+    title: s.titleEn,
+    sector: s.technicalCommittee?.sector.name,
+    tc: s.technicalCommittee?.code,
+  });
+
+  const noTextAll = published.filter((s) => !standardVersionHasText(s.versions[0] || {}));
+  const noText = noTextAll.filter((s) => rowMatchesQuery(flat(s), q, SEARCH_FIELDS));
+  const noTextListing = listPage(sp.page, noText.length);
+  const noTextPage = noText.slice(noTextListing.skip, noTextListing.skip + noTextListing.take);
+  const noTextRequestedAll = noTextAll
     .map((s) => ({
       standard: s,
       requestCount: s.libraryRequestItems.length,
@@ -43,6 +69,9 @@ export default async function AdminLibraryReportsPage({ params }: { params: Prom
     }))
     .filter((row) => row.requestCount > 0)
     .sort((a, b) => b.requestCount - a.requestCount);
+  const noTextRequested = noTextRequestedAll.filter((row) => rowMatchesQuery(flat(row.standard), rq, SEARCH_FIELDS));
+  const requestedListing = listPage(sp.rpage, noTextRequested.length);
+  const requestedPage = noTextRequested.slice(requestedListing.skip, requestedListing.skip + requestedListing.take);
 
   const head = (cols: string[]) => (
     <thead>
@@ -62,12 +91,21 @@ export default async function AdminLibraryReportsPage({ params }: { params: Prom
       </div>
 
       <section>
-        <h2 className="text-lg font-semibold">Standards with no text ({noText.length})</h2>
+        <h2 className="text-lg font-semibold">Standards with no text ({noTextAll.length})</h2>
+        <UrlListSearch
+          pathname={listPath}
+          initial={q}
+          placeholder="Search designation, title, sector, or TC"
+          keep={{ rq, rpage: sp.rpage }}
+          from={noTextListing.from}
+          to={noTextListing.to}
+          total={noTextListing.total}
+        />
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-sm">
             {head(["Designation", "Title", "Sector", "TC"])}
             <tbody>
-              {noText.map((s) => (
+              {noTextPage.map((s) => (
                 <tr key={s.id} className="border-b border-[var(--line)]">
                   <td className="px-3 py-2">{s.designation}</td>
                   <td className="px-3 py-2">{s.titleEn}</td>
@@ -76,20 +114,39 @@ export default async function AdminLibraryReportsPage({ params }: { params: Prom
                 </tr>
               ))}
               {noText.length === 0 ? (
-                <tr><td colSpan={4} className="px-3 py-2 text-[var(--muted)]">Every published standard has text.</td></tr>
+                <tr><td colSpan={4} className="px-3 py-2 text-[var(--muted)]">{q ? "No standards match this search." : "Every published standard has text."}</td></tr>
               ) : null}
             </tbody>
           </table>
         </div>
+        <div className="mt-3">
+          <LinePager
+            page={noTextListing.page}
+            pageCount={noTextListing.pageCount}
+            prevHref={listHref(listPath, noTextListing.page - 1, { q, rq, rpage: sp.rpage })}
+            nextHref={listHref(listPath, noTextListing.page + 1, { q, rq, rpage: sp.rpage })}
+          />
+        </div>
       </section>
 
       <section>
-        <h2 className="text-lg font-semibold">Requested standards with no text ({noTextRequested.length})</h2>
+        <h2 className="text-lg font-semibold">Requested standards with no text ({noTextRequestedAll.length})</h2>
+        <UrlListSearch
+          pathname={listPath}
+          param="rq"
+          pageParam="rpage"
+          initial={rq}
+          placeholder="Search designation, title, sector, or TC"
+          keep={{ q, page: sp.page }}
+          from={requestedListing.from}
+          to={requestedListing.to}
+          total={requestedListing.total}
+        />
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-sm">
             {head(["Designation", "Title", "Sector", "TC", "Requests", "Latest request"])}
             <tbody>
-              {noTextRequested.map(({ standard: s, requestCount, latestRequestAt }) => (
+              {requestedPage.map(({ standard: s, requestCount, latestRequestAt }) => (
                 <tr key={s.id} className="border-b border-[var(--line)]">
                   <td className="px-3 py-2">{s.designation}</td>
                   <td className="px-3 py-2">{s.titleEn}</td>
@@ -100,10 +157,18 @@ export default async function AdminLibraryReportsPage({ params }: { params: Prom
                 </tr>
               ))}
               {noTextRequested.length === 0 ? (
-                <tr><td colSpan={6} className="px-3 py-2 text-[var(--muted)]">No requests for standards without text.</td></tr>
+                <tr><td colSpan={6} className="px-3 py-2 text-[var(--muted)]">{rq ? "No standards match this search." : "No requests for standards without text."}</td></tr>
               ) : null}
             </tbody>
           </table>
+        </div>
+        <div className="mt-3">
+          <LinePager
+            page={requestedListing.page}
+            pageCount={requestedListing.pageCount}
+            prevHref={listHref(listPath, requestedListing.page - 1, { q, page: sp.page, rq }, "rpage")}
+            nextHref={listHref(listPath, requestedListing.page + 1, { q, page: sp.page, rq }, "rpage")}
+          />
         </div>
       </section>
     </div>

@@ -9,8 +9,19 @@ import { ClientRedirect } from "@/components/admin/client-redirect";
 import { CrudForm } from "@/components/admin/crud-form";
 import { Badge } from "@/components/ui/badge";
 import { portalStatusByPin } from "@/lib/imported-marks";
+import { withBasePath } from "@/lib/base-path";
+import { LinePager } from "@/components/line-pager";
+import { UrlListSearch } from "@/components/admin/url-list-search";
+import { listHref, listPage } from "@/lib/list-page";
+import { normalizeListQuery, rowMatchesQuery } from "@/lib/list-query";
 
-export default async function CbImportedMarksPage({ params }: { params: Promise<{ locale: string }> }) {
+export default async function CbImportedMarksPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ locale: string }>;
+  searchParams: Promise<{ q?: string; page?: string }>;
+}) {
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
   const locale = raw as Locale;
@@ -33,6 +44,15 @@ export default async function CbImportedMarksPage({ params }: { params: Promise<
     orderBy: { createdAt: "desc" },
   });
 
+  const sp = await searchParams;
+  const q = normalizeListQuery(sp.q);
+  const listPath = `/${locale}/cb/imported-marks`;
+  const matched = removed.filter((mark) =>
+    rowMatchesQuery(mark, q, ["productName", "brand", "certificationId", "pinText"]),
+  );
+  const listing = listPage(sp.page, matched.length);
+  const pageRows = matched.slice(listing.skip, listing.skip + listing.take);
+
   return (
     <main className="shell space-y-6 py-10">
       <div>
@@ -53,44 +73,61 @@ export default async function CbImportedMarksPage({ params }: { params: Promise<
           None of your copied products have been removed.
         </p>
       ) : (
-        removed.map((mark) => {
-          const pending = requests.find((request) => request.pinText === mark.pinText && request.status === "pending");
-          const latest = requests.find((request) => request.pinText === mark.pinText);
-          return (
-            <article key={mark.id} className="rounded-xl border border-[var(--line)] p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-medium">{mark.productName}</span>
-                <Badge tone="bad">Removed by ARSO</Badge>
-              </div>
-              <p className="mt-2 text-sm">
-                {mark.certificationId} · <span className="font-mono">{mark.pinText}</span>
-              </p>
-              {mark.brand ? <p className="mt-1 text-sm">Brand: {mark.brand}</p> : null}
-              <p className="mt-1 text-sm">Reason: {portals.reason.get(mark.pinText) || "No reason recorded"}</p>
-              {latest?.status === "rejected" && latest.arsoNote && (
-                <p className="mt-1 text-sm">ARSO declined the last request: {latest.arsoNote}</p>
-              )}
-              {pending ? (
-                <p className="mt-3 text-sm text-[var(--muted)]">A return request is waiting for ARSO.</p>
-              ) : (
-                (names.includes(mark.cbName.trim().toLowerCase()) || (mark.certificationBodyOrgId && cbIds.has(mark.certificationBodyOrgId))) && (
-                  <div className="mt-3">
-                    <CrudForm
-                      action="/api/cb/imported-marks/relist"
-                      submitLabel="Ask ARSO to return this product"
-                      idPrefix={`${mark.id}-ask-`}
-                      fields={[
-                        { name: "pinText", label: "PIN", hidden: true, defaultValue: mark.pinText },
-                        { name: "reason", label: "Why it should be listed again", type: "textarea", required: true },
-                      ]}
-                    />
-                  </div>
-                )
-              )}
-            </article>
-          );
-        })
+        <UrlListSearch
+          pathname={listPath}
+          initial={q}
+          placeholder="Search product, brand, certificate, or PIN"
+          from={listing.from}
+          to={listing.to}
+          total={listing.total}
+        />
       )}
+      {removed.length > 0 && matched.length === 0 && (
+        <p className="text-sm text-[var(--muted)]">No removed products match this search.</p>
+      )}
+      {pageRows.map((mark) => {
+        const pending = requests.find((request) => request.pinText === mark.pinText && request.status === "pending");
+        const latest = requests.find((request) => request.pinText === mark.pinText);
+        return (
+          <article key={mark.id} className="rounded-xl border border-[var(--line)] p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium">{mark.productName}</span>
+              <Badge tone="bad">Removed by ARSO</Badge>
+            </div>
+            <p className="mt-2 text-sm">
+              {mark.certificationId} · <span className="font-mono">{mark.pinText}</span>
+            </p>
+            {mark.brand ? <p className="mt-1 text-sm">Brand: {mark.brand}</p> : null}
+            <p className="mt-1 text-sm">Reason: {portals.reason.get(mark.pinText) || "No reason recorded"}</p>
+            {latest?.status === "rejected" && latest.arsoNote && (
+              <p className="mt-1 text-sm">ARSO declined the last request: {latest.arsoNote}</p>
+            )}
+            {pending ? (
+              <p className="mt-3 text-sm text-[var(--muted)]">A return request is waiting for ARSO.</p>
+            ) : (
+              (names.includes(mark.cbName.trim().toLowerCase()) || (mark.certificationBodyOrgId && cbIds.has(mark.certificationBodyOrgId))) && (
+                <div className="mt-3">
+                  <CrudForm
+                    action={withBasePath("/api/cb/imported-marks/relist")}
+                    submitLabel="Ask ARSO to return this product"
+                    idPrefix={`${mark.id}-ask-`}
+                    fields={[
+                      { name: "pinText", label: "PIN", hidden: true, defaultValue: mark.pinText },
+                      { name: "reason", label: "Why it should be listed again", type: "textarea", required: true },
+                    ]}
+                  />
+                </div>
+              )
+            )}
+          </article>
+        );
+      })}
+      <LinePager
+        page={listing.page}
+        pageCount={listing.pageCount}
+        prevHref={listHref(listPath, listing.page - 1, { q })}
+        nextHref={listHref(listPath, listing.page + 1, { q })}
+      />
     </main>
   );
 }

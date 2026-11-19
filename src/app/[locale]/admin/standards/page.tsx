@@ -13,9 +13,12 @@ import { adoptionRate, LANGUAGE_FILE_FIELDS, publishedLocales, STANDARD_KINDS, s
 import { webstoreListingLabel } from "@/lib/catalog-access";
 import { LinePager } from "@/components/line-pager";
 import { listHref, listPage } from "@/lib/list-page";
+import { normalizeListQuery } from "@/lib/list-query";
+import { UrlListSearch } from "@/components/admin/url-list-search";
 import { extractAssessmentDrafts, type AssessmentDraft } from "@/lib/standard-assessment";
 import { DeskTabs } from "../../cb/desk-tabs";
 import { StandardRequirements } from "./standard-requirements";
+import { withBasePath } from "@/lib/base-path";
 
 function draftsForVersion(machineDocJson: string, requirementsJson: string, designation: string) {
   let machine: {
@@ -56,7 +59,7 @@ export default async function AdminStandardsPage({
   searchParams,
 }: {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ page?: string; q?: string }>;
 }) {
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
@@ -65,10 +68,22 @@ export default async function AdminStandardsPage({
   if (!session) return <ClientRedirect href={`/${locale}/login?next=/${locale}/admin/standards`} />;
   if (!can(session.user, "standards:read")) notFound();
 
-  const total = await prisma.standard.count();
-  const listing = listPage((await searchParams).page, total);
+  const sp = await searchParams;
+  const q = normalizeListQuery(sp.q);
+  const where = q
+    ? {
+        OR: [
+          { designation: { contains: q, mode: "insensitive" as const } },
+          { titleEn: { contains: q, mode: "insensitive" as const } },
+        ],
+      }
+    : {};
+  const listPath = `/${locale}/admin/standards`;
+  const total = await prisma.standard.count({ where });
+  const listing = listPage(sp.page, total);
   const [rows, tariffs, requirementStandards, sectors, memberStates, memberStateTotal] = await Promise.all([
     prisma.standard.findMany({
+      where,
       include: {
         technicalCommittee: { include: { sector: true } },
         adoptions: { include: { memberState: true } },
@@ -193,7 +208,7 @@ export default async function AdminStandardsPage({
         <div className="space-y-2">
           <h3 className="text-sm font-semibold">Manual create</h3>
           <CrudForm
-            action="/api/admin/standards"
+            action={withBasePath("/api/admin/standards")}
             submitLabel="Create standard"
             fields={[
               { name: "designation", label: "Designation", required: true, placeholder: "ARS 464" },
@@ -264,6 +279,15 @@ export default async function AdminStandardsPage({
         </div>
       )}
 
+      <UrlListSearch
+        pathname={listPath}
+        hash="standards"
+        initial={q}
+        placeholder="Search designation or title"
+        from={listing.from}
+        to={listing.to}
+        total={listing.total}
+      />
       <div className="panel overflow-x-auto">
         <table className="w-full min-w-[800px] text-left text-sm">
           <thead>
@@ -284,7 +308,7 @@ export default async function AdminStandardsPage({
             {rows.length === 0 && (
               <tr>
                 <td colSpan={10} className="px-4 py-8 text-center text-[var(--muted)]">
-                  No standards yet — import a PDF/Word or create manually.
+                  {q ? "No standards match this search." : "No standards yet — import a PDF/Word or create manually."}
                 </td>
               </tr>
             )}
@@ -363,7 +387,7 @@ export default async function AdminStandardsPage({
                           Full preview
                         </Link>
                       )}
-                      {canDelete && <DeleteButton action={`/api/admin/standards/${r.id}`} />}
+                      {canDelete && <DeleteButton action={withBasePath(`/api/admin/standards/${r.id}`)} />}
                     </div>
                   </td>
                 </tr>
@@ -376,7 +400,7 @@ export default async function AdminStandardsPage({
                         </summary>
                         <div className="mt-3">
                           <CrudForm
-                            action={`/api/admin/standards/${r.id}`}
+                            action={withBasePath(`/api/admin/standards/${r.id}`)}
                             method="PATCH"
                             idPrefix={`${r.id}-`}
                             submitLabel="Save changes"
@@ -484,8 +508,8 @@ export default async function AdminStandardsPage({
       <LinePager
         page={listing.page}
         pageCount={listing.pageCount}
-        prevHref={listHref(`/${locale}/admin/standards`, listing.page - 1)}
-        nextHref={listHref(`/${locale}/admin/standards`, listing.page + 1)}
+        prevHref={listHref(listPath, listing.page - 1, { q })}
+        nextHref={listHref(listPath, listing.page + 1, { q })}
       />
     </div>
           ),

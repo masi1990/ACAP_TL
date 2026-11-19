@@ -6,6 +6,8 @@ import { isLocale, type Locale } from "@/lib/i18n";
 import { ClientRedirect } from "@/components/admin/client-redirect";
 import { LinePager } from "@/components/line-pager";
 import { listHref, listPage } from "@/lib/list-page";
+import { normalizeListQuery } from "@/lib/list-query";
+import { UrlListSearch } from "@/components/admin/url-list-search";
 import { isDistribution } from "@/lib/catalog-access";
 import { PriceTable, type PriceRow } from "./price-table";
 
@@ -14,7 +16,7 @@ export default async function AdminPricesPage({
   searchParams,
 }: {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ page?: string; q?: string }>;
 }) {
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
@@ -23,17 +25,33 @@ export default async function AdminPricesPage({
   if (!session) return <ClientRedirect href={`/${locale}/login?next=/${locale}/admin/prices`} />;
   if (!can(session.user, "standards:read")) notFound();
 
+  const sp = await searchParams;
+  const q = normalizeListQuery(sp.q);
+  const where = q
+    ? {
+        OR: [
+          { editionLabel: { contains: q, mode: "insensitive" as const } },
+          { standard: { designation: { contains: q, mode: "insensitive" as const } } },
+          { standard: { titleEn: { contains: q, mode: "insensitive" as const } } },
+        ],
+      }
+    : {};
+  const listPath = `/${locale}/admin/prices`;
+  const total = await prisma.standardVersion.count({ where });
+  const listing = listPage(sp.page, total);
   const versions = await prisma.standardVersion.findMany({
+    where,
     include: {
       standard: true,
       catalogItem: true,
       tariffMaps: { include: { tariffLine: { include: { rec: true } } } },
     },
-    orderBy: { standard: { designation: "asc" } },
+    orderBy: [{ standard: { designation: "asc" } }, { id: "asc" }],
+    skip: listing.skip,
+    take: listing.take,
   });
 
-  const listing = listPage((await searchParams).page, versions.length);
-  const rows: PriceRow[] = versions.slice(listing.skip, listing.skip + listing.take).map((version) => ({
+  const rows: PriceRow[] = versions.map((version) => ({
     versionId: version.id,
     designation: version.standard.designation,
     title: version.standard.titleEn,
@@ -63,12 +81,28 @@ export default async function AdminPricesPage({
           the community it applies in, such as EAC.
         </p>
       </div>
-      <PriceTable rows={rows} canWrite={can(session.user, "standards:write")} />
+      <UrlListSearch
+        pathname={listPath}
+        initial={q}
+        placeholder="Search designation, title, or edition"
+        from={listing.from}
+        to={listing.to}
+        total={listing.total}
+      />
+      {rows.length === 0 && q ? (
+        <p className="text-base text-[var(--ink)]">No standards match this search.</p>
+      ) : (
+        <PriceTable
+          key={`${q}|${listing.page}`}
+          rows={rows}
+          canWrite={can(session.user, "standards:write")}
+        />
+      )}
       <LinePager
         page={listing.page}
         pageCount={listing.pageCount}
-        prevHref={listHref(`/${locale}/admin/prices`, listing.page - 1)}
-        nextHref={listHref(`/${locale}/admin/prices`, listing.page + 1)}
+        prevHref={listHref(listPath, listing.page - 1, { q })}
+        nextHref={listHref(listPath, listing.page + 1, { q })}
       />
       <p className="text-sm text-[var(--ink)]">/{locale}/admin/prices</p>
     </div>

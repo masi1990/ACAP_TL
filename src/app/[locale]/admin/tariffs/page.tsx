@@ -8,13 +8,16 @@ import { ClientRedirect } from "@/components/admin/client-redirect";
 import { Badge } from "@/components/ui/badge";
 import { LinePager } from "@/components/line-pager";
 import { listHref, listPage } from "@/lib/list-page";
+import { normalizeListQuery } from "@/lib/list-query";
+import { UrlListSearch } from "@/components/admin/url-list-search";
+import { withBasePath } from "@/lib/base-path";
 
 export default async function AdminTariffsPage({
   params,
   searchParams,
 }: {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ page?: string; q?: string }>;
 }) {
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
@@ -23,10 +26,25 @@ export default async function AdminTariffsPage({
   if (!session) return <ClientRedirect href={`/${locale}/login?next=/${locale}/admin/tariffs`} />;
   if (!can(session.user, "tariffs:read")) notFound();
 
-  const total = await prisma.tariffLine.count();
-  const listing = listPage((await searchParams).page, total);
+  const sp = await searchParams;
+  const q = normalizeListQuery(sp.q);
+  const compactQ = q.replace(/[^0-9a-z]/gi, "");
+  const where = q
+    ? {
+        OR: [
+          { codeDisplay: { contains: q, mode: "insensitive" as const } },
+          ...(compactQ ? [{ codeNormalized: { contains: compactQ, mode: "insensitive" as const } }] : []),
+          { description: { contains: q, mode: "insensitive" as const } },
+          { rec: { code: { contains: q, mode: "insensitive" as const } } },
+        ],
+      }
+    : {};
+  const listPath = `/${locale}/admin/tariffs`;
+  const total = await prisma.tariffLine.count({ where });
+  const listing = listPage(sp.page, total);
   const [rows, recs] = await Promise.all([
     prisma.tariffLine.findMany({
+      where,
       include: { rec: true },
       orderBy: [{ codeLength: "asc" }, { codeNormalized: "asc" }],
       skip: listing.skip,
@@ -48,7 +66,7 @@ export default async function AdminTariffsPage({
 
       {canWrite && (
         <CrudForm
-          action="/api/admin/tariffs"
+          action={withBasePath("/api/admin/tariffs")}
           submitLabel="Add tariff line"
           fields={[
             {
@@ -76,6 +94,14 @@ export default async function AdminTariffsPage({
         </p>
       )}
 
+      <UrlListSearch
+        pathname={listPath}
+        initial={q}
+        placeholder="Search code, description, or REC"
+        from={listing.from}
+        to={listing.to}
+        total={listing.total}
+      />
       <div className="panel overflow-x-auto">
         <table className="w-full min-w-[640px] text-left text-sm">
           <thead>
@@ -91,7 +117,7 @@ export default async function AdminTariffsPage({
             {rows.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-4 py-8 text-center text-[var(--muted)]">
-                  No tariff lines yet.
+                  {q ? "No tariff lines match this search." : "No tariff lines yet."}
                 </td>
               </tr>
             )}
@@ -104,7 +130,7 @@ export default async function AdminTariffsPage({
                 <td className="px-4 py-3">HS{r.codeLength}</td>
                 <td className="px-4 py-3 text-[var(--muted)]">{r.description}</td>
                 <td className="px-4 py-3 text-right">
-                  {canDelete && <DeleteButton action={`/api/admin/tariffs/${r.id}`} />}
+                  {canDelete && <DeleteButton action={withBasePath(`/api/admin/tariffs/${r.id}`)} />}
                 </td>
               </tr>
             ))}
@@ -114,8 +140,8 @@ export default async function AdminTariffsPage({
       <LinePager
         page={listing.page}
         pageCount={listing.pageCount}
-        prevHref={listHref(`/${locale}/admin/tariffs`, listing.page - 1)}
-        nextHref={listHref(`/${locale}/admin/tariffs`, listing.page + 1)}
+        prevHref={listHref(listPath, listing.page - 1, { q })}
+        nextHref={listHref(listPath, listing.page + 1, { q })}
       />
       <p className="text-xs text-[var(--muted)]">/{locale}/admin/tariffs</p>
     </div>

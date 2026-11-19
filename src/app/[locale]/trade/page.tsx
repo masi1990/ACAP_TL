@@ -10,12 +10,15 @@ import { parseOriginClaim } from "@/lib/origin-claim";
 import { PRODUCT_COVERAGE } from "@/lib/cb-profile";
 import { productFormFields } from "@/lib/product-form";
 import { listHref, listPage } from "@/lib/list-page";
+import { normalizeListQuery, rowMatchesQuery } from "@/lib/list-query";
+import { UrlListSearch } from "@/components/admin/url-list-search";
 import { ClientRedirect } from "@/components/admin/client-redirect";
 import { CrudForm, DeleteButton } from "@/components/admin/crud-form";
 import { LinePager } from "@/components/line-pager";
 import { groupImportedMarks, portalStatusByPin } from "@/lib/imported-marks";
 import { DeskTabs } from "../cb/desk-tabs";
 import { TradeInvite } from "./trade-invite";
+import { withBasePath } from "@/lib/base-path";
 
 function certificationLabel(status: string | undefined, certified: boolean) {
   if (certified) return "Certified";
@@ -40,7 +43,14 @@ export default async function TradePage({
   searchParams,
 }: {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ clientsPage?: string; productsPage?: string }>;
+  searchParams: Promise<{
+    clientsPage?: string;
+    productsPage?: string;
+    certifiedPage?: string;
+    clientsQ?: string;
+    productsQ?: string;
+    certifiedQ?: string;
+  }>;
 }) {
   const { locale: raw } = await params;
   const query = await searchParams;
@@ -159,7 +169,7 @@ export default async function TradePage({
         <CrudForm
           searchable
           idPrefix={prefix}
-          action="/api/trade/companies"
+          action={withBasePath("/api/trade/companies")}
           submitLabel="Submit client"
           fields={[
             { name: "name", label: "Client", required: true },
@@ -188,16 +198,80 @@ export default async function TradePage({
     );
   }
 
-  const clientListing = listPage(query.clientsPage, orgRows.length);
-  const clientPageRows = orgRows.slice(clientListing.skip, clientListing.skip + clientListing.take);
-  const productListing = listPage(query.productsPage, products.length);
-  const productPageRows = products.slice(productListing.skip, productListing.skip + productListing.take);
+  const clientsQ = normalizeListQuery(query.clientsQ);
+  const productsQ = normalizeListQuery(query.productsQ);
+  const certifiedQ = normalizeListQuery(query.certifiedQ);
+  const tradePath = `/${locale}/trade`;
 
-  function tabHref(which: "clients" | "products", page: number) {
+  const matchedClients = orgRows.filter((organization) =>
+    rowMatchesQuery(
+      {
+        name: organization.name,
+        kind: organization.type,
+        country: organization.clientAccounts[0]?.companies[0]?.countryIso2,
+        body: organization.servicingCb?.name,
+      },
+      clientsQ,
+      ["name", "kind", "country", "body"],
+    ),
+  );
+  const clientListing = listPage(query.clientsPage, matchedClients.length);
+  const clientPageRows = matchedClients.slice(clientListing.skip, clientListing.skip + clientListing.take);
+
+  const productSearchRow = (product: (typeof products)[number]) => ({
+    name: product.name,
+    commodity: product.commodity,
+    client: product.company.clientAccount.organization.name,
+    standards: product.standardLinks.map((link) => link.standardVersion.standard.designation).join(" "),
+    body: product.certifyingCb?.name || product.applications[0]?.organization.name,
+    certificates: product.applications.flatMap((row) => (row.coc ? [row.coc.certificateNo] : [])).join(" "),
+  });
+  const PRODUCT_FIELDS = ["name", "commodity", "client", "standards", "body", "certificates"];
+  const matchedProducts = products.filter((product) =>
+    rowMatchesQuery(productSearchRow(product), productsQ, PRODUCT_FIELDS),
+  );
+  const productListing = listPage(query.productsPage, matchedProducts.length);
+  const productPageRows = matchedProducts.slice(productListing.skip, productListing.skip + productListing.take);
+
+  const matchedCertified = certified.filter((product) =>
+    rowMatchesQuery(productSearchRow(product), certifiedQ, PRODUCT_FIELDS),
+  );
+  const matchedImported = importedGroups.filter((marks) =>
+    rowMatchesQuery(
+      {
+        name: marks[0].productName,
+        company: marks[0].manufacturerOrg?.name || marks[0].companyName,
+        body: marks[0].certificationBodyOrg?.name || marks[0].cbName,
+        standards: marks
+          .map((mark) => mark.standardVersion?.standard.designation || mark.sourceStandardText || "")
+          .join(" "),
+        certificates: marks.map((mark) => `${mark.certificationId} ${mark.pinText}`).join(" "),
+      },
+      certifiedQ,
+      ["name", "company", "body", "standards", "certificates"],
+    ),
+  );
+  const certifiedListing = listPage(query.certifiedPage, matchedCertified.length + matchedImported.length);
+  const certifiedEnd = certifiedListing.skip + certifiedListing.take;
+  const certifiedPageRows = matchedCertified.slice(certifiedListing.skip, certifiedEnd);
+  const importedPageGroups = matchedImported.slice(
+    Math.max(0, certifiedListing.skip - matchedCertified.length),
+    Math.max(0, certifiedEnd - matchedCertified.length),
+  );
+
+  const tradeQuery = {
+    clientsQ: clientsQ || undefined,
+    productsQ: productsQ || undefined,
+    certifiedQ: certifiedQ || undefined,
+    clientsPage: query.clientsPage,
+    productsPage: query.productsPage,
+    certifiedPage: query.certifiedPage,
+  };
+  function tabHref(which: "clients" | "products" | "certified", page: number) {
     return (
-      listHref(`/${locale}/trade`, 1, {
-        clientsPage: which === "clients" ? (page > 1 ? String(page) : undefined) : query.clientsPage,
-        productsPage: which === "products" ? (page > 1 ? String(page) : undefined) : query.productsPage,
+      listHref(tradePath, 1, {
+        ...tradeQuery,
+        [`${which}Page`]: page > 1 ? String(page) : undefined,
       }) + `#${which}`
     );
   }
@@ -216,6 +290,19 @@ export default async function TradePage({
       {orgRows.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">No clients yet.</p>
       ) : (
+        <>
+        <UrlListSearch
+          pathname={tradePath}
+          hash="clients"
+          param="clientsQ"
+          pageParam="clientsPage"
+          keep={{ ...tradeQuery, clientsQ: undefined, clientsPage: undefined }}
+          initial={clientsQ}
+          placeholder="Search client, country, or certification body"
+          from={clientListing.from}
+          to={clientListing.to}
+          total={clientListing.total}
+        />
         <div className="panel overflow-x-auto">
           <table className="w-full min-w-[720px] text-left text-sm">
             <thead>
@@ -243,7 +330,7 @@ export default async function TradePage({
                       <td className="px-4 py-3">{companyStatus(status)}</td>
                       <td className="px-4 py-3 text-right">
                         {clientDeletable(organization.id, status) && (
-                          <DeleteButton action={`/api/trade/companies/${organization.id}`} />
+                          <DeleteButton action={withBasePath(`/api/trade/companies/${organization.id}`)} />
                         )}
                       </td>
                     </tr>
@@ -265,7 +352,7 @@ export default async function TradePage({
                                 searchable
                                 method="PATCH"
                                 idPrefix={`clients-company-${organization.id}-`}
-                                action={`/api/trade/companies/${organization.id}`}
+                                action={withBasePath(`/api/trade/companies/${organization.id}`)}
                                 submitLabel="Save client"
                                 fields={[
                                   { name: "name", label: "Client", required: true, defaultValue: organization.name },
@@ -309,6 +396,10 @@ export default async function TradePage({
             </tbody>
           </table>
         </div>
+        {matchedClients.length === 0 && (
+          <p className="text-sm text-[var(--muted)]">No clients match this search.</p>
+        )}
+        </>
       )}
       <LinePager
         page={clientListing.page}
@@ -331,7 +422,7 @@ export default async function TradePage({
           <CrudForm
             searchable
             idPrefix="products-add-"
-            action="/api/trade/products"
+            action={withBasePath("/api/trade/products")}
             submitLabel="Submit product"
             fields={productFormFields({
               traders: companyOptions,
@@ -353,6 +444,19 @@ export default async function TradePage({
       {products.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">No products yet.</p>
       ) : (
+        <>
+        <UrlListSearch
+          pathname={tradePath}
+          hash="products"
+          param="productsQ"
+          pageParam="productsPage"
+          keep={{ ...tradeQuery, productsQ: undefined, productsPage: undefined }}
+          initial={productsQ}
+          placeholder="Search product, client, standard, or certificate"
+          from={productListing.from}
+          to={productListing.to}
+          total={productListing.total}
+        />
         <div className="panel overflow-x-auto">
           <table className="w-full min-w-[720px] text-left text-sm">
             <thead>
@@ -410,7 +514,7 @@ export default async function TradePage({
                         </Link>
                         {canEdit && (
                           <span className="ml-3 inline-block align-middle">
-                            <DeleteButton action={`/api/trade/products/${product.id}`} />
+                            <DeleteButton action={withBasePath(`/api/trade/products/${product.id}`)} />
                           </span>
                         )}
                       </td>
@@ -425,7 +529,7 @@ export default async function TradePage({
                                 searchable
                                 method="PATCH"
                                 idPrefix={`products-edit-${product.id}-`}
-                                action={`/api/trade/products/${product.id}`}
+                                action={withBasePath(`/api/trade/products/${product.id}`)}
                                 submitLabel="Save product"
                                 fields={productFormFields({
                                   traders: companyOptions,
@@ -458,6 +562,10 @@ export default async function TradePage({
             </tbody>
           </table>
         </div>
+        {matchedProducts.length === 0 && (
+          <p className="text-sm text-[var(--muted)]">No products match this search.</p>
+        )}
+        </>
       )}
       <LinePager
         page={productListing.page}
@@ -478,44 +586,59 @@ export default async function TradePage({
       {certified.length === 0 && importedGroups.length === 0 ? (
         <p className="text-sm text-[var(--muted)]">No certified products yet.</p>
       ) : (
-        certified.map((product) => {
-          const applications = [...product.applications].sort(
-            (a, b) => Number(a.markScheme === "ECO") - Number(b.markScheme === "ECO"),
-          );
-          const links = [...product.standardLinks].sort(
-            (a, b) => Number(a.markScheme === "ECO") - Number(b.markScheme === "ECO"),
-          );
-          return (
-            <article key={product.id} className="panel p-4">
-              <h2 className="font-medium">{product.name}</h2>
-              <p className="mt-1 text-sm text-[var(--muted)]">
-                {product.company.clientAccount.organization.name}
-                {applications[0]?.organization.name ? ` · ${applications[0].organization.name}` : ""}
-              </p>
-              <ul className="mt-2 space-y-1 text-sm text-[var(--muted)]">
-                {links.map((link) => {
-                  const application = applications.find((row) => row.markScheme === link.markScheme);
-                  const passed = application?.assessmentItems.filter((item) => item.pass === true).length ?? 0;
-                  const total = application?.assessmentItems.length ?? 0;
-                  return (
-                    <li key={link.id}>
-                      {link.markScheme === "ECO" ? "Eco Mark" : "Quality Mark"} · {link.standardVersion.standard.designation}
-                      {application?.coc ? ` · ${application.coc.certificateNo}` : ""}
-                      {total ? ` · ${passed} of ${total} requirements passed` : ""}
-                    </li>
-                  );
-                })}
-              </ul>
-              <p className="mt-3 text-sm">
-                <Link className="text-[var(--accent)] underline" href={`/${locale}/trade/products/${product.id}`}>
-                  View record
-                </Link>
-              </p>
-            </article>
-          );
-        })
+        <UrlListSearch
+          pathname={tradePath}
+          hash="certified"
+          param="certifiedQ"
+          pageParam="certifiedPage"
+          keep={{ ...tradeQuery, certifiedQ: undefined, certifiedPage: undefined }}
+          initial={certifiedQ}
+          placeholder="Search product, client, standard, or certificate"
+          from={certifiedListing.from}
+          to={certifiedListing.to}
+          total={certifiedListing.total}
+        />
       )}
-      {importedGroups.map((marks) => {
+      {certifiedListing.total === 0 && (certified.length > 0 || importedGroups.length > 0) && (
+        <p className="text-sm text-[var(--muted)]">No certified products match this search.</p>
+      )}
+      {certifiedPageRows.map((product) => {
+        const applications = [...product.applications].sort(
+          (a, b) => Number(a.markScheme === "ECO") - Number(b.markScheme === "ECO"),
+        );
+        const links = [...product.standardLinks].sort(
+          (a, b) => Number(a.markScheme === "ECO") - Number(b.markScheme === "ECO"),
+        );
+        return (
+          <article key={product.id} className="panel p-4">
+            <h2 className="font-medium">{product.name}</h2>
+            <p className="mt-1 text-sm text-[var(--muted)]">
+              {product.company.clientAccount.organization.name}
+              {applications[0]?.organization.name ? ` · ${applications[0].organization.name}` : ""}
+            </p>
+            <ul className="mt-2 space-y-1 text-sm text-[var(--muted)]">
+              {links.map((link) => {
+                const application = applications.find((row) => row.markScheme === link.markScheme);
+                const passed = application?.assessmentItems.filter((item) => item.pass === true).length ?? 0;
+                const total = application?.assessmentItems.length ?? 0;
+                return (
+                  <li key={link.id}>
+                    {link.markScheme === "ECO" ? "Eco Mark" : "Quality Mark"} · {link.standardVersion.standard.designation}
+                    {application?.coc ? ` · ${application.coc.certificateNo}` : ""}
+                    {total ? ` · ${passed} of ${total} requirements passed` : ""}
+                  </li>
+                );
+              })}
+            </ul>
+            <p className="mt-3 text-sm">
+              <Link className="text-[var(--accent)] underline" href={`/${locale}/trade/products/${product.id}`}>
+                View record
+              </Link>
+            </p>
+          </article>
+        );
+      })}
+      {importedPageGroups.map((marks) => {
         const primary = marks[0];
         const company = primary.manufacturerOrg?.name || primary.companyName;
         const body = primary.certificationBodyOrg?.name || primary.cbName;
@@ -539,6 +662,12 @@ export default async function TradePage({
                   </li>
                 );
               })}
+      <LinePager
+        page={certifiedListing.page}
+        pageCount={certifiedListing.pageCount}
+        prevHref={tabHref("certified", certifiedListing.page - 1)}
+        nextHref={tabHref("certified", certifiedListing.page + 1)}
+      />
             </ul>
             <p className="mt-3 text-sm">
               <Link
@@ -569,7 +698,7 @@ export default async function TradePage({
         <CrudForm
           searchable
           idPrefix="institution-request-"
-          action="/api/institution-requests"
+          action={withBasePath("/api/institution-requests")}
           submitLabel="Submit request"
           fields={[
             { name: "name", label: "Institution name", required: true },
