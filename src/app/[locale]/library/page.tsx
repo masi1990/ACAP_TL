@@ -6,7 +6,8 @@ import { isLocale, type Locale } from "@/lib/i18n";
 import { logLibraryActivity, userLibraryView } from "@/lib/library";
 import { standardVersionHasText } from "@/lib/library-text";
 import { standardKindOrNull, publishedLocales } from "@/lib/standard-kinds";
-import { LibraryHoldings, type LibraryStandardRow } from "./library-standard-browser";
+import { LibraryPageShell } from "./library-page-shell";
+import type { LibraryStandardRow } from "./library-types";
 import { StandardRequestForm } from "./standard-request-form";
 
 function titleFor(
@@ -82,7 +83,15 @@ export default async function LibraryPage({ params }: { params: Promise<{ locale
           <Link href={`/${locale}/library/register`} className="rounded-md bg-[var(--ink)] px-4 py-2 text-sm text-white">Create a login</Link>
           <Link href={`/${locale}/login?next=/${locale}/library`} className="rounded-md border border-[var(--line)] px-4 py-2 text-sm">Sign in</Link>
         </div>
-        <StandardRequestForm locale={locale} />
+        <div className="mt-8">
+          <LibraryPageShell
+            locale={locale}
+            holdingsRows={null}
+            activity={[]}
+            signedIn={false}
+            requestForm={<StandardRequestForm locale={locale} />}
+          />
+        </div>
       </div>
     );
   }
@@ -136,31 +145,30 @@ export default async function LibraryPage({ params }: { params: Promise<{ locale
           Waiting for ARSO to decide your request for {pending.organization.name}, {pending.memberState.name}.
         </p>
       ) : null}
-      {!view.access.length ? (
-        <p className="mt-6 text-sm text-[var(--muted)]">You do not have library access yet.</p>
-      ) : visible.length === 0 ? (
-        <p className="mt-6 text-sm text-[var(--muted)]">No standards are released to you yet.</p>
-      ) : (
-        <div className="mt-6">
-          <LibraryHoldings locale={locale} rows={visible.flatMap((standard) => libraryRow(standard, locale))} />
-        </div>
-      )}
-      <StandardRequestForm locale={locale} signedInEmail={session.user.email} signedInName={session.user.name} />
-      <section className="mt-10">
-        <h2 className="text-lg font-semibold">Your activity</h2>
-        <ul className="mt-3 space-y-2 text-sm">
-          {activity.map((row) => (
-            <li key={row.id} className="rounded-md border border-[var(--line)] px-3 py-2">
-              {row.occurredAt.toISOString().slice(0, 16).replace("T", " ")} · {row.action}
-              {row.roleCode ? ` · ${row.roleCode}` : ""}
-              {row.standard ? ` · ${row.standard.designation}` : ""}
-              {row.language ? ` · ${row.language}` : ""}
-              {row.posting ? ` · ${row.posting.kind} ${row.posting.countryIso2}` : ""}
-            </li>
-          ))}
-          {activity.length === 0 ? <li className="text-[var(--muted)]">No library activity yet.</li> : null}
-        </ul>
-      </section>
+      <div className="mt-6">
+        <LibraryPageShell
+          locale={locale}
+          holdingsRows={view.access.length ? visible.flatMap((standard) => libraryRow(standard, locale)) : null}
+          accessMessage={
+            !view.access.length ? (
+              <p className="text-sm text-[var(--muted)]">You do not have library access yet. You can still browse the catalogue below.</p>
+            ) : visible.length === 0 ? (
+              <p className="text-sm text-[var(--muted)]">No standards are released to you yet. You can still browse the catalogue below.</p>
+            ) : null
+          }
+          signedIn
+          activity={activity.map((row) => ({
+            id: row.id,
+            at: row.occurredAt.toISOString().slice(0, 16).replace("T", " "),
+            action: row.action,
+            roleCode: row.roleCode || undefined,
+            designation: row.standard?.designation,
+            language: row.language || undefined,
+            posting: row.posting ? `${row.posting.kind} ${row.posting.countryIso2}` : undefined,
+          }))}
+          requestForm={<StandardRequestForm locale={locale} signedInEmail={session.user.email} signedInName={session.user.name} />}
+        />
+      </div>
     </div>
   );
 }
