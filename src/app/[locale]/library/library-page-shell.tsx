@@ -76,5 +76,5 @@ export function LibraryPageShell({
       : []),
   ];
 
-  return <DeskTabs tabs={tabs} />;
+  return <DeskTabs tabs={tabs} keepMounted />;
 }

@@ -20,6 +20,7 @@ export function LibraryCatalogue({
   onSelectSectorFromAnalysis,
   query,
   onQuery,
+  totalCount,
 }: {
   locale: Locale;
   rows: LibraryStandardRow[];
@@ -33,6 +34,8 @@ export function LibraryCatalogue({
   /** Parent-owned (server) search; omit for client-side search over `rows`. */
   query?: string;
   onQuery?: (value: string) => void;
+  /** Server match total when `rows` is capped. */
+  totalCount?: number;
 }) {
   const [view, setView] = useState<"browse" | "analysis">("browse");
   const [localFilter, setLocalFilter] = useState<LibraryFilter>({ sectorId: "", committeeId: "", kind: "" });
@@ -73,6 +76,7 @@ export function LibraryCatalogue({
                 query={query}
                 onQuery={onQuery}
                 showSearch={mode === "browse"}
+                totalCount={totalCount}
               />
             </div>
           ),

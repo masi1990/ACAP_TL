@@ -11,6 +11,7 @@ export function LibraryOptionsBrowser({ locale }: { locale: Locale }) {
   const [filter, setFilter] = useState<LibraryFilter>({ sectorId: "", committeeId: "", kind: "" });
   const [query, setQuery] = useState("");
   const [rows, setRows] = useState<LibraryStandardRow[]>([]);
+  const [matchCount, setMatchCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -29,6 +30,7 @@ export function LibraryOptionsBrowser({ locale }: { locale: Locale }) {
         .then((data) => {
           if (data.facets) setFacets(data.facets);
           setRows(data.standards || []);
+          setMatchCount(typeof data.matchCount === "number" ? data.matchCount : (data.standards || []).length);
           setError("");
         })
         .catch((err: unknown) => {
@@ -57,6 +59,7 @@ export function LibraryOptionsBrowser({ locale }: { locale: Locale }) {
         onFilter={setFilter}
         query={query}
         onQuery={setQuery}
+        totalCount={matchCount}
         emptyLabel={loading ? "Loading standards…" : "No published standards match this selection."}
       />
     </div>

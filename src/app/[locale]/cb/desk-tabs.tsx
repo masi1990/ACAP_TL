@@ -8,6 +8,7 @@ export function DeskTabs({
   activeId,
   onSelect,
   syncHash = true,
+  keepMounted = false,
 }: {
   tabs: { id: string; label: string; content: ReactNode }[];
   /** When set, the parent owns which tab is open. */
@@ -15,6 +16,8 @@ export function DeskTabs({
   onSelect?: (id: string) => void;
   /** Nested tabs leave the page hash to the outer tab list. */
   syncHash?: boolean;
+  /** Render every panel and hide inactive ones, so tab state (e.g. forms) survives switching. */
+  keepMounted?: boolean;
 }) {
   const [internal, setInternal] = useState(tabs[0]?.id || "");
   const active = activeId ?? internal;
@@ -57,9 +60,20 @@ export function DeskTabs({
           );
         })}
       </div>
-      <div className="pt-6" role="tabpanel">
-        {current?.content}
-      </div>
+      {keepMounted ? (
+        tabs.map((tab) => {
+          const selected = tab.id === current?.id;
+          return (
+            <div key={tab.id} className="pt-6" role="tabpanel" hidden={!selected} aria-hidden={!selected}>
+              {tab.content}
+            </div>
+          );
+        })
+      ) : (
+        <div className="pt-6" role="tabpanel">
+          {current?.content}
+        </div>
+      )}
     </div>
   );
 }

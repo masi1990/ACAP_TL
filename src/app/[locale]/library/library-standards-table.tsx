@@ -19,6 +19,7 @@ export function LibraryStandardsTable({
   query,
   onQuery,
   showSearch,
+  totalCount,
 }: {
   locale: Locale;
   rows: LibraryStandardRow[];
@@ -31,6 +32,8 @@ export function LibraryStandardsTable({
   query?: string;
   onQuery?: (value: string) => void;
   showSearch: boolean;
+  /** Server-side match total when `rows` is a capped page of a larger result set. */
+  totalCount?: number;
 }) {
   const [localQuery, setLocalQuery] = useState("");
   const [limit, setLimit] = useState(PAGE);
@@ -68,6 +71,8 @@ export function LibraryStandardsTable({
     [scoped, filter.kind, parentOwnsQuery, text],
   );
   const shown = visible.slice(0, limit);
+  const total = Math.max(totalCount ?? 0, visible.length);
+  const capped = total > visible.length;
 
   const committee = filter.committeeId ? catalogue.committees.find((item) => item.id === filter.committeeId) : null;
   const sector = filter.sectorId ? catalogue.sectors.find((item) => item.id === filter.sectorId) : null;
@@ -192,7 +197,9 @@ export function LibraryStandardsTable({
           </div>
           <div className="flex items-center justify-between text-xs text-[var(--muted)]">
             <span>
-              Showing {shown.length.toLocaleString()} of {visible.length.toLocaleString()}
+              {capped && shown.length >= visible.length
+                ? `Showing first ${shown.length.toLocaleString()} of ${total.toLocaleString()} — search or pick a TC to narrow.`
+                : `Showing ${shown.length.toLocaleString()} of ${total.toLocaleString()}`}
             </span>
             {shown.length < visible.length ? (
               <button type="button" className="text-sm underline" onClick={() => setLimit((value) => value + PAGE)}>
