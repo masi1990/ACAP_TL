@@ -23,6 +23,9 @@ import {
   queueInspectionNonConform,
   queueSurveillanceOpened,
 } from "@/lib/notifications";
+import { ComplaintTargetError, resolveComplaintTarget } from "@/lib/complaint-target";
+import { ComplaintPhotoError, storeComplaintPhoto } from "@/lib/complaint-photos";
+import { listCertifiedProducts } from "@/lib/registry";
 type Ctx = { params: Promise<{ action: string }> };
 
 function fail(message: string, status = 400) {
@@ -43,11 +46,55 @@ function iso2(value: unknown, label: string) {
   return code;
 }
 
+export async function GET(req: NextRequest, ctx: Ctx) {
+  const { action } = await ctx.params;
+  if (action !== "certified-products") return fail("Unknown action", 404);
+  const sp = req.nextUrl.searchParams;
+  const data = await listCertifiedProducts({
+    q: sp.get("q") || undefined,
+    status: "certified",
+    page: Number(sp.get("page") || 1) || 1,
+    pageSize: Math.min(20, Number(sp.get("pageSize") || 20) || 20),
+  });
+  return NextResponse.json({
+    ok: true,
+    products: data.products.map((p) => ({
+      id: p.id,
+      productName: p.productName,
+      brand: p.brand || p.productName,
+      manufacturer: p.companyName,
+      pinCode: p.pinCode,
+      pinCodes: p.pinCodes || [],
+      cbName: p.cbName,
+      countryIso2: p.countryIso2,
+      countryName: p.countryName,
+      status: p.status,
+    })),
+    total: data.total,
+    page: data.page,
+    pageCount: data.pageCount,
+  });
+}
+
 export async function POST(req: NextRequest, ctx: Ctx) {
   const { action } = await ctx.params;
-  const body = await req.json().catch(() => ({}));
 
-  if (action === "complaints") return fileComplaint(body);
+  if (action === "complaints") {
+    const contentType = req.headers.get("content-type") || "";
+    if (contentType.includes("multipart/form-data")) {
+      const form = await req.formData().catch(() => null);
+      if (!form) return fail("Invalid form data");
+      return fileComplaint(Object.fromEntries(form.entries()), {
+        labelPhoto: form.get("labelPhoto"),
+        markPhoto: form.get("markPhoto"),
+        receiptPhoto: form.get("receiptPhoto"),
+      });
+    }
+    const body = await req.json().catch(() => ({}));
+    return fileComplaint(body);
+  }
+
+  const body = await req.json().catch(() => ({}));
 
   const permission =
     action === "products"
@@ -332,53 +379,106 @@ async function openSurveillance(session: AuthedSession, body: Record<string, unk
   return NextResponse.json({ ok: true, id: row.id }, { status: 201 });
 }
 
-async function fileComplaint(body: Record<string, unknown>) {
-  const email = String(body.complainantEmail || "").trim().toLowerCase();
-  const subject = String(body.subject || "").trim();
-  const text = String(body.body || "").trim();
-  const pinCode = String(body.pinCode || "").trim();
-  if (!email || !email.includes("@")) return fail("A contact email is required");
-  if (!subject || !text) return fail("Subject and details are required");
+function optionalDate(value: unknown): Date | null {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) throw new Error("Enter valid manufacture or expiry dates");
+  return d;
+}
 
-  const pin = pinCode
-    ? await prisma.productPin.findUnique({
-        where: { pinCode },
-        include: { coc: { include: { application: true } } },
-      })
-    : null;
-  if (pinCode && !pin) return fail("PIN not found");
+async function fileComplaint(
+  body: Record<string, unknown>,
+  files?: { labelPhoto: FormDataEntryValue | null; markPhoto: FormDataEntryValue | null; receiptPhoto: FormDataEntryValue | null },
+) {
+  try {
+    const email = String(body.complainantEmail || "").trim().toLowerCase();
+    const subject = String(body.subject || "").trim();
+    const text = String(body.body || "").trim();
+    const originCountryIso2 = iso2(body.originCountryIso2, "Country of origin");
+    const manufactureCountryIso2 = iso2(body.manufactureCountryIso2, "Country of manufacture");
+    if (!email || !email.includes("@")) return fail("A contact email is required");
+    if (!subject || !text) return fail("Subject and details are required");
 
-  const routedCbId = pin?.coc?.application.organizationId ?? null;
-  const complaint = await prisma.consumerComplaint.create({
-    data: {
-      pinId: pin?.id,
-      complainantEmail: email,
+    const target = await resolveComplaintTarget({
+      registryKey: String(body.registryKey || body.productId || "").trim(),
+      productId: String(body.productId || "").trim(),
+      pinCode: String(body.pinCode || "").trim(),
+    });
+
+    const labelPhotoUri = await storeComplaintPhoto(
+      files?.labelPhoto instanceof File ? files.labelPhoto : null,
+      "label",
+    );
+    const markPhotoUri = await storeComplaintPhoto(
+      files?.markPhoto instanceof File ? files.markPhoto : null,
+      "mark",
+    );
+    const receiptPhotoUri = await storeComplaintPhoto(
+      files?.receiptPhoto instanceof File ? files.receiptPhoto : null,
+      "receipt",
+    );
+
+    const complaint = await prisma.consumerComplaint.create({
+      data: {
+        pinId: target.pinId,
+        productId: target.productId,
+        registryKey: target.registryKey,
+        brand: target.brand,
+        manufacturer: target.manufacturer,
+        originCountryIso2,
+        manufactureCountryIso2,
+        purchasePlace: String(body.purchasePlace || "").trim(),
+        quantity: String(body.quantity || "").trim(),
+        flavour: String(body.flavour || "").trim(),
+        manufacturedOn: optionalDate(body.manufacturedOn),
+        expiresOn: optionalDate(body.expiresOn),
+        labelPhotoUri,
+        markPhotoUri,
+        receiptPhotoUri,
+        complainantEmail: email,
+        subject,
+        body: text,
+        status: "OPEN",
+        routedCbId: target.routedCbId,
+      },
+    });
+
+    await appendAuditEvent({
+      action: "CONSUMER_COMPLAINT",
+      entityType: "ConsumerComplaint",
+      entityId: complaint.id,
+      organizationId: target.routedCbId,
+    });
+
+    await queueComplaintEmails({
+      complaintId: complaint.id,
+      email,
       subject,
       body: text,
-      status: "OPEN",
-      routedCbId,
-    },
-  });
+      brand: target.brand,
+      manufacturer: target.manufacturer,
+      originCountryIso2,
+      manufactureCountryIso2,
+      purchasePlace: String(body.purchasePlace || "").trim(),
+      quantity: String(body.quantity || "").trim(),
+      flavour: String(body.flavour || "").trim(),
+      pinCode: target.pinCode,
+      cbName: target.cbName,
+      routedCbId: target.routedCbId,
+    });
+    await notifyAfterCommit();
 
-  await appendAuditEvent({
-    action: "CONSUMER_COMPLAINT",
-    entityType: "ConsumerComplaint",
-    entityId: complaint.id,
-    organizationId: routedCbId,
-  });
-
-  await queueComplaintEmails({
-    complaintId: complaint.id,
-    email,
-    subject,
-    routedCbId,
-  });
-  await notifyAfterCommit();
-
-  return NextResponse.json({
-    ok: true,
-    message: routedCbId
-      ? "Complaint filed and routed to the certification body"
-      : "Complaint filed",
-  });
+    return NextResponse.json({
+      ok: true,
+      id: complaint.id,
+      message: `Complaint filed and routed to ${target.cbName}`,
+    });
+  } catch (err) {
+    if (err instanceof ComplaintTargetError || err instanceof ComplaintPhotoError) {
+      return fail(err.message);
+    }
+    const message = err instanceof Error ? err.message : "Request failed";
+    return fail(message);
+  }
 }

@@ -1,4 +1,5 @@
 import { authorityOwnerStateIds, can, isTradeOrgType, permissionsForUser } from "./rbac";
+import { canAccessComplaintsInbox } from "./complaint-access";
 import { t, type Locale } from "./i18n";
 
 type NavUser = Parameters<typeof can>[0];
@@ -116,6 +117,14 @@ export function workNav(user: NavUser, locale: Locale): NavLink[] {
       href: `/${locale}/surveillance`,
       label: t(locale, "navSurveillance"),
       blurb: "Follow-up after the product is on the market",
+    });
+  }
+  if (canAccessComplaintsInbox(user)) {
+    links.push({
+      id: "complaints",
+      href: `/${locale}/complaints`,
+      label: "Complaints",
+      blurb: "Consumer complaints routed to certification bodies",
     });
   }
   if (can(user, "institutions:read") || authorityOwnerStateIds(user).length > 0) {

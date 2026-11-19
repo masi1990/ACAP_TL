@@ -345,14 +345,39 @@ export async function queueComplaintEmails(input: {
   complaintId: string;
   email: string;
   subject: string;
+  body?: string;
+  brand?: string;
+  manufacturer?: string;
+  originCountryIso2?: string;
+  manufactureCountryIso2?: string;
+  purchasePlace?: string;
+  quantity?: string;
+  flavour?: string;
+  pinCode?: string | null;
+  cbName?: string;
   routedCbId: string | null;
 }) {
+  const copy = {
+    complaintId: input.complaintId,
+    email: input.email,
+    subject: input.subject,
+    body: input.body || "",
+    brand: input.brand || "",
+    manufacturer: input.manufacturer || "",
+    originCountryIso2: input.originCountryIso2 || "",
+    manufactureCountryIso2: input.manufactureCountryIso2 || "",
+    purchasePlace: input.purchasePlace || "",
+    quantity: input.quantity || "",
+    flavour: input.flavour || "",
+    pinCode: input.pinCode || "",
+    cbName: input.cbName || "",
+  };
   await enqueueNotification({
     kind: NotificationKind.COMPLAINT_RECEIVED,
     dedupeKey: `${NotificationKind.COMPLAINT_RECEIVED}:${input.complaintId}:now`,
     entityType: "ConsumerComplaint",
     entityId: input.complaintId,
-    payload: { email: input.email, subject: input.subject },
+    payload: copy,
   });
   if (input.routedCbId) {
     await enqueueNotification({
@@ -360,7 +385,7 @@ export async function queueComplaintEmails(input: {
       dedupeKey: `${NotificationKind.COMPLAINT_ROUTED}:${input.complaintId}:now`,
       entityType: "ConsumerComplaint",
       entityId: input.complaintId,
-      payload: { routedCbId: input.routedCbId, subject: input.subject, email: input.email },
+      payload: { ...copy, routedCbId: input.routedCbId },
     });
   }
 }
@@ -751,25 +776,52 @@ async function prepareJob(job: {
     case NotificationKind.COMPLAINT_RECEIVED:
       return {
         recipients: onlyEmails([payload.email]),
-        subject: "We received your complaint",
+        subject: `We received your complaint (${payload.complaintId || "ACAP"})`,
         text: [
-          "Your complaint has been recorded.",
+          "Your complaint has been recorded. A copy follows.",
+          "",
+          `Reference: ${payload.complaintId || "—"}`,
           payload.subject ? `Subject: ${payload.subject}` : "",
+          payload.brand ? `Product / brand: ${payload.brand}` : "",
+          payload.manufacturer ? `Manufacturer: ${payload.manufacturer}` : "",
+          payload.pinCode ? `PIN: ${payload.pinCode}` : "",
+          payload.cbName ? `Routed to: ${payload.cbName}` : "",
+          payload.originCountryIso2 ? `Country of origin: ${payload.originCountryIso2}` : "",
+          payload.manufactureCountryIso2 ? `Country of manufacture: ${payload.manufactureCountryIso2}` : "",
+          payload.purchasePlace ? `Where purchased: ${payload.purchasePlace}` : "",
+          payload.quantity ? `Quantity: ${payload.quantity}` : "",
+          payload.flavour ? `Flavour: ${payload.flavour}` : "",
+          "",
+          "Details:",
+          payload.body || "(no additional details)",
+          "",
           "The certification body responsible for the product will review it.",
         ]
-          .filter(Boolean)
+          .filter((line) => line !== undefined)
           .join("\n"),
       };
     case NotificationKind.COMPLAINT_ROUTED:
       return {
         recipients: await emailsForOrganizations([payload.routedCbId]),
-        subject: "Consumer complaint routed to your certification body",
+        subject: `Consumer complaint routed to your certification body (${payload.complaintId || "ACAP"})`,
         text: [
           "A consumer complaint has been routed to your certification body.",
+          "Open the Complaints desk in ACAP to review it.",
+          "",
+          `Reference: ${payload.complaintId || "—"}`,
           payload.subject ? `Subject: ${payload.subject}` : "",
           payload.email ? `Complainant: ${payload.email}` : "",
+          payload.brand ? `Product / brand: ${payload.brand}` : "",
+          payload.manufacturer ? `Manufacturer: ${payload.manufacturer}` : "",
+          payload.pinCode ? `PIN: ${payload.pinCode}` : "",
+          payload.originCountryIso2 ? `Country of origin: ${payload.originCountryIso2}` : "",
+          payload.manufactureCountryIso2 ? `Country of manufacture: ${payload.manufactureCountryIso2}` : "",
+          payload.purchasePlace ? `Where purchased: ${payload.purchasePlace}` : "",
+          "",
+          "Details:",
+          payload.body || "(no additional details)",
         ]
-          .filter(Boolean)
+          .filter((line) => line !== undefined)
           .join("\n"),
       };
     case NotificationKind.CUSTOMS_DECISION: {

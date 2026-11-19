@@ -627,6 +627,7 @@ model Product {
   applications       CertificationApplication[]
   inspections        ConformityInspection[]
   clearances         CustomsClearance[]
+  complaints         ConsumerComplaint[]
 }
 
 model ProductStandardLink {
@@ -834,7 +835,7 @@ model FeeEvent {
 model NotificationJob {
   id           String    @id @default(cuid())
   cocId        String?
-  coc          CoC?      @relation(fields: [cocId], references: [id])
+  coc          CoC?      @relation(fields: [cocId], references: [id], onDelete: SetNull)
   kind         String
   monthsOut    Int?
   entityType   String?
@@ -1033,6 +1034,22 @@ model ConsumerComplaint {
   id             String        @id @default(cuid())
   pinId          String?
   pin            ProductPin?   @relation(fields: [pinId], references: [id])
+  productId      String?
+  product        Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  /// Registry row key (hub product id or live-{liveProductId}).
+  registryKey    String        @default("")
+  brand          String        @default("")
+  manufacturer   String        @default("")
+  originCountryIso2 String     @default("")
+  manufactureCountryIso2 String @default("")
+  purchasePlace  String        @default("")
+  quantity       String        @default("")
+  flavour        String        @default("")
+  manufacturedOn DateTime?
+  expiresOn      DateTime?
+  labelPhotoUri  String?
+  markPhotoUri   String?
+  receiptPhotoUri String?
   complainantEmail String
   subject        String
   body           String
@@ -1040,6 +1057,10 @@ model ConsumerComplaint {
   routedCbId     String?
   routedCb       Organization? @relation("RoutedCb", fields: [routedCbId], references: [id])
   createdAt      DateTime      @default(now())
+
+  @@index([routedCbId])
+  @@index([productId])
+  @@index([createdAt])
 }
 
 model FraudAlert {

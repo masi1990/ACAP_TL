@@ -16,6 +16,7 @@ const PUBLIC_API_PREFIXES = [
   "/api/store/download",
   "/api/store/free",
   "/api/store/pesapal",
+  "/api/uploads",
   "/api/registry",
   "/api/analytics",
   "/api/certificates",
@@ -24,6 +25,7 @@ const PUBLIC_API_PREFIXES = [
   "/api/auth/forgot-password",
   "/api/auth/reset-password",
   "/api/chain/complaints",
+  "/api/chain/certified-products",
   "/api/auth/accept-invite",
   "/api/jobs/dispatch",
   "/api/catalogue/export",
@@ -90,7 +92,10 @@ export function middleware(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE)?.value;
   if (!token) {
     const locale = pathname.split("/").filter(Boolean)[0] || "en";
-    const login = new URL(`/${LOCALES.has(locale) ? locale : "en"}/login`, req.url);
+    // Clone nextUrl so basePath (/arso) is preserved — `new URL(/en/login, origin)` drops it.
+    const login = req.nextUrl.clone();
+    login.pathname = `/${LOCALES.has(locale) ? locale : "en"}/login`;
+    login.search = "";
     login.searchParams.set("next", pathname);
     return NextResponse.redirect(login);
   }
