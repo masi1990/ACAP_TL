@@ -2,21 +2,24 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { isLocale, type Locale } from "@/lib/i18n";
-import { listPublicCatalogue } from "@/lib/catalogue-list";
+import { listPublicCataloguePage } from "@/lib/catalogue-list";
+import { LinePager } from "@/components/line-pager";
+import { listHref } from "@/lib/list-page";
 import { ScopeReveal } from "@/components/scope-reveal";
+import { withBasePath } from "@/lib/base-path";
 export default async function CataloguePage({
   params,
   searchParams,
 }: {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ q?: string; sector?: string; committee?: string; tariff?: string }>;
+  searchParams: Promise<{ q?: string; sector?: string; committee?: string; tariff?: string; page?: string }>;
 }) {
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();
   const locale = raw as Locale;
   const sp = await searchParams;
-  const [rows, sectors] = await Promise.all([
-    listPublicCatalogue(locale, sp),
+  const [{ rows, total, listing }, sectors] = await Promise.all([
+    listPublicCataloguePage(locale, sp, sp.page),
     prisma.sector.findMany({ include: { committees: { orderBy: { code: "asc" } } }, orderBy: { code: "asc" } }),
   ]);
   const sectorId = sp.sector?.trim() || "";
@@ -30,6 +33,14 @@ export default async function CataloguePage({
   if (sp.tariff) query.set("tariff", sp.tariff);
   query.set("locale", locale);
   const exportQuery = query.toString();
+  const basePath = `/${locale}/catalogue`;
+  const filterKeys = {
+    q: sp.q?.trim() || undefined,
+    sector: sp.sector?.trim() || undefined,
+    committee: sp.committee?.trim() || undefined,
+    tariff: sp.tariff?.trim() || undefined,
+  };
+  const clearHref = listHref(basePath, 1, { ...filterKeys, q: undefined });
 
   return (
     <div className="shell py-10">
@@ -64,12 +75,21 @@ export default async function CataloguePage({
           <span>Tariff line</span>
           <input name="tariff" defaultValue={sp.tariff || ""} placeholder="Code or description" className="rounded-md border border-[var(--line)] bg-white px-3 py-2" />
         </label>
-        <button type="submit" className="self-end rounded-md bg-[var(--ink)] px-4 py-2 text-sm text-white">Apply</button>
+        <div className="flex items-end gap-2">
+          <button type="submit" className="rounded-md bg-[var(--ink)] px-4 py-2 text-sm text-white">Apply</button>
+          {filterKeys.q ? (
+            <Link href={clearHref} className="inline-flex h-10 items-center rounded-md border border-[var(--line)] px-4 text-sm">
+              Clear
+            </Link>
+          ) : null}
+        </div>
       </form>
       <div className="mt-4 flex flex-wrap gap-3 text-sm">
-        <a className="underline" href={`/api/catalogue/export?format=csv&${exportQuery}`}>Download CSV</a>
-        <a className="underline" href={`/api/catalogue/export?format=pdf&${exportQuery}`}>Download PDF</a>
-        <span className="text-[var(--muted)]">{rows.length} standard{rows.length === 1 ? "" : "s"}</span>
+        <a className="underline" href={withBasePath(`/api/catalogue/export?format=csv&${exportQuery}`)}>Download CSV</a>
+        <a className="underline" href={withBasePath(`/api/catalogue/export?format=pdf&${exportQuery}`)}>Download PDF</a>
+        <span className="text-[var(--muted)]">
+          {total > 0 ? `Showing ${listing.from}–${listing.to} of ${total}` : `${total} matches`}
+        </span>
       </div>
       <div className="mt-6 overflow-x-auto rounded-xl border border-[var(--line)]">
         <table className="min-w-full text-left text-sm">
@@ -102,6 +122,14 @@ export default async function CataloguePage({
             )}
           </tbody>
         </table>
+      </div>
+      <div className="mt-4">
+        <LinePager
+          page={listing.page}
+          pageCount={listing.pageCount}
+          prevHref={listHref(basePath, listing.page - 1, filterKeys)}
+          nextHref={listHref(basePath, listing.page + 1, filterKeys)}
+        />
       </div>
       <p className="mt-4 text-sm text-[var(--muted)]">
         To buy a copy, use the <Link className="underline" href={`/${locale}/store`}>webstore</Link>.

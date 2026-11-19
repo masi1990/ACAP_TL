@@ -1,10 +1,15 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { isLocale, t, type Locale } from "@/lib/i18n";
 import { adoptionRate, LANGUAGE_FILE_FIELDS, publishedLocales, STANDARD_KINDS, standardKindLabel } from "@/lib/standard-kinds";
 import { getPesapalConfig } from "@/lib/pesapal";
+import { withBasePath } from "@/lib/base-path";
 import { getCatalogPreviewPayload } from "@/lib/store-preview-server";
 import { webstoreListingLabel } from "@/lib/catalog-access";
+import { LinePager } from "@/components/line-pager";
+import { listHref, listPage } from "@/lib/list-page";
 import { StoreCatalogItem } from "./store-catalog-item";
 import { StorePreviewOverlay } from "./store-preview-overlay";
 
@@ -24,7 +29,7 @@ export async function CatalogueView({
   mode,
 }: {
   locale: Locale;
-  sp: { preview?: string; payError?: string; lang?: string; q?: string; sector?: string; committee?: string; kind?: string };
+  sp: { preview?: string; payError?: string; lang?: string; q?: string; sector?: string; committee?: string; kind?: string; page?: string };
   mode: "catalogue" | "store";
 }) {
   const previewId = sp.preview?.trim();
@@ -37,10 +42,12 @@ export async function CatalogueView({
   const pesapal = getPesapalConfig();
   const pesapalReady = pesapal.configured && pesapal.appBaseUrl.startsWith("https://");
 
-  const [standards, memberStateTotal, sectors] = await Promise.all([
-    prisma.standard.findMany({
-      where: {
-        versions: { some: { publicationStatus: "PUBLISHED" } },
+  const publishedVersion: Prisma.StandardVersionWhereInput =
+    mode === "store"
+      ? { publicationStatus: "PUBLISHED", catalogItem: { is: { active: true } } }
+      : { publicationStatus: "PUBLISHED" };
+  const where: Prisma.StandardWhereInput = {
+        versions: { some: publishedVersion },
         ...(kind ? { kind } : {}),
         ...(committeeId ? { technicalCommitteeId: committeeId } : {}),
         ...(sectorId ? { technicalCommittee: { sectorId } } : {}),
@@ -56,18 +63,27 @@ export async function CatalogueView({
               ],
             }
           : {}),
-      },
+  };
+
+  const total = await prisma.standard.count({ where });
+  const listing = listPage(sp.page, total);
+
+  const [standards, memberStateTotal, sectors] = await Promise.all([
+    prisma.standard.findMany({
+      where,
       include: {
         technicalCommittee: { include: { sector: true } },
         adoptions: { include: { memberState: true } },
         versions: {
-          where: { publicationStatus: "PUBLISHED" },
+          where: publishedVersion,
           orderBy: { year: "desc" },
           take: 1,
           include: { catalogItem: true, languageFiles: true },
         },
       },
       orderBy: { designation: "asc" },
+      skip: listing.skip,
+      take: listing.take,
     }),
     prisma.memberState.count(),
     prisma.sector.findMany({
@@ -77,8 +93,30 @@ export async function CatalogueView({
   ]);
 
   const previewPayload = previewId ? await getCatalogPreviewPayload(previewId, sp.lang) : null;
+  // The preview item may sit on another page, so load its version directly instead of searching the page rows.
+  const previewVersion =
+    previewPayload?.catalogItemId && previewId
+      ? await prisma.standardVersion.findFirst({
+          where: { catalogItem: { is: { id: previewId } } },
+          select: { authoritativeLocale: true, sourcePdfUri: true, languageFiles: true },
+        })
+      : null;
   const languageName = (code: string) =>
     t(locale, code === "fr" ? "French" : code === "pt" ? "Portuguese" : code === "ar" ? "Arabic" : "English");
+  const previewLanguages =
+    previewPayload?.catalogItemId && previewId
+      ? (() => {
+          if (!previewVersion) return [] as { locale: string; label: string }[];
+          const version = previewVersion;
+          const published = new Set(
+            publishedLocales(version.languageFiles, version.authoritativeLocale, version.sourcePdfUri),
+          );
+          return LANGUAGE_FILE_FIELDS.filter((language) => published.has(language.locale)).map((language) => ({
+            locale: language.locale,
+            label: languageName(language.locale),
+          }));
+        })()
+      : [];
 
   type StandardRow = (typeof standards)[number];
   const committeesForSector = sectorId
@@ -122,6 +160,15 @@ export async function CatalogueView({
     sectorGroup.count += 1;
   }
 
+  const basePath = `/${locale}/${mode === "catalogue" ? "catalogue" : "store"}`;
+  const filterKeys = {
+    q: q || undefined,
+    sector: sectorId || undefined,
+    committee: committeeId || undefined,
+    kind: kind || undefined,
+  };
+  const clearHref = listHref(basePath, 1, { ...filterKeys, q: undefined });
+
   const orderedGroups = [...groups.entries()].sort((a, b) => {
     if (a[0] === "unassigned") return 1;
     if (b[0] === "unassigned") return -1;
@@ -131,7 +178,7 @@ export async function CatalogueView({
   return (
     <div className="shell py-10">
       {previewPayload ? (
-        <StorePreviewOverlay locale={locale} data={previewPayload} />
+        <StorePreviewOverlay locale={locale} data={previewPayload} languages={previewLanguages} />
       ) : previewId ? (
         <div className="mb-4 rounded-lg border border-rose-300/50 bg-rose-50 px-4 py-3 text-sm text-rose-900">
           Preview not found for that catalog item. Choose a standard below.
@@ -151,7 +198,7 @@ export async function CatalogueView({
           ? "Published standards, grouped by sector and then by technical committee."
           : "Add published standards to your cart, then pay for them together. A standard is listed here only after it is published to the webstore."}
       </p>
-      <form className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" method="get" action={`/${locale}/${mode === "catalogue" ? "catalogue" : "store"}`}>
+      <form className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" method="get" action={withBasePath(`/${locale}/${mode === "catalogue" ? "catalogue" : "store"}`)}>
         <label className="grid gap-1 text-sm">
           <span>Search</span>
           <input name="q" defaultValue={q} placeholder="Designation, title, or ICS" className="rounded-md border border-[var(--line)] bg-white px-3 py-2" />
@@ -189,9 +236,19 @@ export async function CatalogueView({
             ))}
           </select>
         </label>
-        <button type="submit" className="rounded-md bg-[var(--ink)] px-4 py-2 text-sm text-white sm:col-span-2 lg:col-span-1">
-          Apply
-        </button>
+        <div className="flex items-end gap-2 sm:col-span-2 lg:col-span-4">
+          <button type="submit" className="rounded-md bg-[var(--ink)] px-4 py-2 text-sm text-white">
+            Apply
+          </button>
+          {q ? (
+            <Link href={clearHref} className="inline-flex h-10 items-center rounded-md border border-[var(--line)] px-4 text-sm">
+              Clear
+            </Link>
+          ) : null}
+          <p className="pb-2 text-sm text-[var(--muted)]">
+            {total > 0 ? `Showing ${listing.from}–${listing.to} of ${total}` : `${total} matches`}
+          </p>
+        </div>
       </form>
 
       {mode === "store" ? (
@@ -263,6 +320,7 @@ export async function CatalogueView({
                             currency={item.currency}
                             distribution={item.distribution}
                             languages={languages}
+                            initialLang={previewId === item.id ? sp.lang : null}
                             kindLabel={standardKindLabel(standard.kind, locale)}
                             sectorName={standard.technicalCommittee?.sector.name ?? null}
                             committeeName={
@@ -284,6 +342,14 @@ export async function CatalogueView({
             ))
           )}
       </div>
+      <div className="mt-6">
+        <LinePager
+          page={listing.page}
+          pageCount={listing.pageCount}
+          prevHref={listHref(basePath, listing.page - 1, filterKeys)}
+          nextHref={listHref(basePath, listing.page + 1, filterKeys)}
+        />
+      </div>
     </div>
   );
 }
@@ -293,7 +359,7 @@ export default async function StorePage({
   searchParams,
 }: {
   params: Promise<{ locale: string }>;
-  searchParams: Promise<{ preview?: string; payError?: string; lang?: string; q?: string; sector?: string; committee?: string; kind?: string }>;
+  searchParams: Promise<{ preview?: string; payError?: string; lang?: string; q?: string; sector?: string; committee?: string; kind?: string; page?: string }>;
 }) {
   const { locale: raw } = await params;
   if (!isLocale(raw)) notFound();

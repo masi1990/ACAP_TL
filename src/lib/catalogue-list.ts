@@ -1,5 +1,7 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
+import { listPage } from "@/lib/list-page";
 import { extractClause1ScopeOnly } from "@/lib/scope-text";
 import type { Locale } from "@/lib/i18n";
 
@@ -30,70 +32,81 @@ function titleFor(
   return standard.titleEn;
 }
 
-export async function listPublicCatalogue(locale: Locale, filters: CatalogueFilters): Promise<CatalogueRow[]> {
+function catalogueWhere(filters: CatalogueFilters): Prisma.StandardWhereInput {
   const q = filters.q?.trim() || "";
   const sectorId = filters.sector?.trim() || "";
   const committeeId = filters.committee?.trim() || "";
   const tariff = filters.tariff?.trim() || "";
-
-  const standards = await prisma.standard.findMany({
-    where: {
-      versions: { some: { publicationStatus: "PUBLISHED" } },
-      ...(committeeId ? { technicalCommitteeId: committeeId } : {}),
-      ...(sectorId ? { technicalCommittee: { sectorId } } : {}),
-      ...(q
-        ? {
-            OR: [
-              { designation: { contains: q, mode: "insensitive" } },
-              { titleEn: { contains: q, mode: "insensitive" } },
-              { titleFr: { contains: q, mode: "insensitive" } },
-              { titlePt: { contains: q, mode: "insensitive" } },
-              { titleAr: { contains: q, mode: "insensitive" } },
-              { versions: { some: { publicationStatus: "PUBLISHED", scopeEn: { contains: q, mode: "insensitive" } } } },
-              {
-                versions: {
-                  some: {
-                    publicationStatus: "PUBLISHED",
-                    tariffMaps: {
-                      some: {
-                        OR: [
-                          { tariffLine: { codeDisplay: { contains: q, mode: "insensitive" } } },
-                          { tariffLine: { description: { contains: q, mode: "insensitive" } } },
-                        ],
-                      },
-                    },
-                  },
+  const and: Prisma.StandardWhereInput[] = [];
+  if (q) {
+    and.push({
+      OR: [
+        { designation: { contains: q, mode: "insensitive" } },
+        { titleEn: { contains: q, mode: "insensitive" } },
+        { titleFr: { contains: q, mode: "insensitive" } },
+        { titlePt: { contains: q, mode: "insensitive" } },
+        { titleAr: { contains: q, mode: "insensitive" } },
+        { versions: { some: { publicationStatus: "PUBLISHED", scopeEn: { contains: q, mode: "insensitive" } } } },
+        {
+          versions: {
+            some: {
+              publicationStatus: "PUBLISHED",
+              tariffMaps: {
+                some: {
+                  OR: [
+                    { tariffLine: { codeDisplay: { contains: q, mode: "insensitive" } } },
+                    { tariffLine: { description: { contains: q, mode: "insensitive" } } },
+                  ],
                 },
               },
-            ],
-          }
-        : {}),
-    },
-    include: {
-      technicalCommittee: { include: { sector: true } },
+            },
+          },
+        },
+      ],
+    });
+  }
+  if (tariff) {
+    and.push({
       versions: {
-        where: { publicationStatus: "PUBLISHED" },
-        orderBy: { year: "desc" },
-        take: 1,
-        include: { tariffMaps: { include: { tariffLine: true } } },
+        some: {
+          publicationStatus: "PUBLISHED",
+          tariffMaps: {
+            some: {
+              OR: [
+                { tariffLine: { codeDisplay: { contains: tariff, mode: "insensitive" } } },
+                { tariffLine: { description: { contains: tariff, mode: "insensitive" } } },
+              ],
+            },
+          },
+        },
       },
-    },
-    orderBy: { designation: "asc" },
-  });
+    });
+  }
+  return {
+    versions: { some: { publicationStatus: "PUBLISHED" } },
+    ...(committeeId ? { technicalCommitteeId: committeeId } : {}),
+    ...(sectorId ? { technicalCommittee: { sectorId } } : {}),
+    ...(and.length ? { AND: and } : {}),
+  };
+}
 
-  const needle = tariff.toLowerCase();
+const catalogueInclude = {
+  technicalCommittee: { include: { sector: true } },
+  versions: {
+    where: { publicationStatus: "PUBLISHED" },
+    orderBy: { year: "desc" },
+    take: 1,
+    include: { tariffMaps: { include: { tariffLine: true } } },
+  },
+} satisfies Prisma.StandardInclude;
+
+type CatalogueStandard = Prisma.StandardGetPayload<{ include: typeof catalogueInclude }>;
+
+function toRows(standards: CatalogueStandard[], locale: Locale): CatalogueRow[] {
   return standards.flatMap((standard) => {
     const version = standard.versions[0];
     if (!version) return [];
     const lines = version.tariffMaps.map((map) => map.tariffLine.codeDisplay);
-    const descriptions = version.tariffMaps.map((map) => map.tariffLine.description);
-    if (
-      needle &&
-      !lines.some((line) => line.toLowerCase().includes(needle)) &&
-      !descriptions.some((line) => line.toLowerCase().includes(needle))
-    ) {
-      return [];
-    }
     const committee = standard.technicalCommittee;
     return [
       {
@@ -107,6 +120,35 @@ export async function listPublicCatalogue(locale: Locale, filters: CatalogueFilt
       },
     ];
   });
+}
+
+/** One server page of the public catalogue (skip/take in the database). */
+export async function listPublicCataloguePage(
+  locale: Locale,
+  filters: CatalogueFilters,
+  rawPage?: string,
+): Promise<{ rows: CatalogueRow[]; total: number; listing: ReturnType<typeof listPage> }> {
+  const where = catalogueWhere(filters);
+  const total = await prisma.standard.count({ where });
+  const listing = listPage(rawPage, total);
+  const standards = await prisma.standard.findMany({
+    where,
+    include: catalogueInclude,
+    orderBy: { designation: "asc" },
+    skip: listing.skip,
+    take: listing.take,
+  });
+  return { rows: toRows(standards, locale), total, listing };
+}
+
+/** Full filtered list. Used only by the CSV/PDF export, never by the on-screen table. */
+export async function listPublicCatalogue(locale: Locale, filters: CatalogueFilters): Promise<CatalogueRow[]> {
+  const standards = await prisma.standard.findMany({
+    where: catalogueWhere(filters),
+    include: catalogueInclude,
+    orderBy: { designation: "asc" },
+  });
+  return toRows(standards, locale);
 }
 
 export function catalogueCsv(rows: CatalogueRow[]) {
