@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from "fs/promises";
+import path from "path";
 import nodemailer from "nodemailer";
 
 export type MailConfig = {
@@ -7,6 +9,13 @@ export type MailConfig = {
   pass: string;
   from: string;
 };
+
+type SendMailInput = { to: string; cc?: string | string[]; subject: string; text: string };
+
+function truthy(raw: string | undefined) {
+  const value = raw?.trim().toLowerCase();
+  return value === "1" || value === "true" || value === "on" || value === "yes";
+}
 
 /** Workspace SMTP settings. Missing user or app password means mail stays queued. */
 export function mailConfig(): MailConfig | null {
@@ -27,9 +36,42 @@ export function isMailConfigured() {
   return mailConfig() !== null;
 }
 
-export async function sendMail(input: { to: string; subject: string; text: string }) {
+function mailOutboxDir(): string | null {
+  if (!truthy(process.env.MAIL_OUTBOX)) return null;
+  const custom = process.env.MAIL_OUTBOX_DIR?.trim();
+  return custom || path.join(process.cwd(), "data", "mail-outbox");
+}
+
+async function writeOutbox(input: { to: string; cc?: string; subject: string; text: string }, dir: string) {
+  await mkdir(dir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const safeTo = input.to.replace(/[^a-zA-Z0-9@._-]/g, "_").slice(0, 80);
+  const file = path.join(dir, `${stamp}-${safeTo}.txt`);
+  await writeFile(
+    file,
+    [
+      `To: ${input.to}`,
+      ...(input.cc ? [`Cc: ${input.cc}`] : []),
+      `Subject: ${input.subject}`,
+      "",
+      input.text,
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  return file;
+}
+
+export async function sendMail(input: SendMailInput) {
+  const cc = Array.isArray(input.cc) ? input.cc.filter(Boolean).join(", ") : input.cc?.trim() || undefined;
+  const payload = { to: input.to, cc, subject: input.subject, text: input.text };
   const config = mailConfig();
-  if (!config) throw new Error("Mail is not configured");
+  if (!config) {
+    const outbox = mailOutboxDir();
+    if (!outbox) throw new Error("Mail is not configured");
+    await writeOutbox(payload, outbox);
+    return;
+  }
   const transport = nodemailer.createTransport({
     host: config.host,
     port: config.port,
@@ -43,6 +85,7 @@ export async function sendMail(input: { to: string; subject: string; text: strin
   await transport.sendMail({
     from: config.from,
     to: input.to,
+    cc,
     subject: input.subject,
     text: input.text,
   });
